@@ -26,7 +26,8 @@ data class PlayRequest(
     val ffmpeg: Boolean,            // true = /transcode can be used as a fallback
     val year: Int = 0,              // for the "2019 · 1080p · MKV" line under the title
     val ext: String = "",
-    val height: Int = 0
+    val height: Int = 0,
+    val askResume: Boolean = false  // true = the user did not choose a start time: offer "Resume / Start over"
 ) {
     companion object {
         fun parse(json: String): PlayRequest {
@@ -60,7 +61,8 @@ data class PlayRequest(
                 ffmpeg = o.optBoolean("ffmpeg", false),
                 year = o.optInt("year", 0),
                 ext = o.optString("ext", ""),
-                height = o.optInt("height", 0)
+                height = o.optInt("height", 0),
+                askResume = o.optBoolean("askResume", false)
             )
         }
     }

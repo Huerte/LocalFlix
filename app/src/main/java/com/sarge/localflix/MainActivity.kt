@@ -269,6 +269,9 @@ class MainActivity : FragmentActivity() {
         /** The page tells us whether Back would have nothing left to close (home screen). */
         @JavascriptInterface fun atRoot(root: Boolean) { pageAtRoot = root }
 
+        /** Watch positions saved by the native player (see ResumeStore). The page merges them into its own list. */
+        @JavascriptInterface fun getResume(): String = ResumeStore.toJson(this@MainActivity)
+
         /** Play a movie in the native player. [json] is described in PlayRequest.kt. */
         @JavascriptInterface fun play(json: String) = runOnUiThread { launchPlayer(json) }
 

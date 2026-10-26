@@ -15,7 +15,15 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.Button
+import android.text.Editable
+import android.text.TextWatcher
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
+import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.TextView
+import org.json.JSONArray
+import java.net.URLEncoder
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -73,9 +81,13 @@ class PlayerActivity : FragmentActivity() {
     private var pendingSeekMs = -1L        // target of a seek that has not been committed yet
     private var resultNextId: String? = null
     private var resultSet = false
+    private var askedResume = false       // the "Resume / Start over" question is asked once per opening
+    private var saveTicks = 0
 
     // ── subtitles ─────────────────────────────────────────────────────────────
-    private var subChoice = -1             // index into req.subtitles, -1 = off
+    // Tracks the player offers: the movie's own ones first, then any file picked with "Browse subtitle files".
+    private val subs = ArrayList<SubTrack>()
+    private var subChoice = -1             // index into subs, -1 = off
     private var appliedSub = Int.MIN_VALUE // direct mode: what is currently applied to ExoPlayer
     private var cues: List<Cue> = emptyList()
     private var cuesFor = -2
@@ -101,6 +113,7 @@ class PlayerActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         val raw = intent.getStringExtra(EXTRA_REQUEST)
         req = try { PlayRequest.parse(raw ?: "") } catch (e: Exception) { finish(); return }
+        subs.addAll(req.subtitles)
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         b = ActivityPlayerBinding.inflate(layoutInflater)
@@ -110,9 +123,9 @@ class PlayerActivity : FragmentActivity() {
         resumeMs = (req.startSeconds * 1000).toLong()
         lastPosMs = resumeMs
         // Subtitles start OFF unless the user turned them on before (then the same track, or the first one).
-        if (prefs.getBoolean(KEY_SUBS_ON, false) && req.subtitles.isNotEmpty()) {
+        if (prefs.getBoolean(KEY_SUBS_ON, false) && subs.isNotEmpty()) {
             val want = prefs.getString(KEY_SUB_LABEL, "")
-            subChoice = req.subtitles.indexOfFirst { it.label == want }.let { if (it >= 0) it else 0 }
+            subChoice = subs.indexOfFirst { it.label == want }.let { if (it >= 0) it else 0 }
         }
 
         speed = prefs.getFloat(KEY_SPEED, 1f)
@@ -148,14 +161,19 @@ class PlayerActivity : FragmentActivity() {
         super.onStart()
         if (!::req.isInitialized) return
         // First start, or coming back after Home / another app: continue where we were.
-        if (player == null && !dialogOn) startPlayback(resumeMs, transcoding)
+        if (player == null && !dialogOn) {
+            if (req.askResume && !askedResume && resumeMs > 10_000) { askedResume = true; promptResume() }
+            else startPlayback(resumeMs, transcoding)
+        }
         ui.post(tick)
     }
 
     override fun onStop() {
         super.onStop()
         if (!::req.isInitialized) return
+        stopHold()
         captureState()
+        persistResume()
         releasePlayer()
         ui.removeCallbacksAndMessages(null)
     }
@@ -170,6 +188,7 @@ class PlayerActivity : FragmentActivity() {
         if (::req.isInitialized && !resultSet) {
             resultSet = true
             captureState()
+            persistResume()
             setResult(RESULT_OK, Intent()
                 .putExtra(RESULT_ID, req.id)
                 .putExtra(RESULT_SECONDS, lastPosMs / 1000.0)
@@ -182,6 +201,28 @@ class PlayerActivity : FragmentActivity() {
     private fun finishWithResult(nextId: String?) {
         resultNextId = nextId
         finish()
+    }
+
+    /**
+     * "Continue watching": shown when the movie opens with a saved position and the user did not pick a start time
+     * (e.g. Play on the home screen). Resume is focused, so one press of OK continues where they stopped.
+     */
+    private fun promptResume() {
+        val pos = resumeMs
+        val dur = durationMs()
+        val text = "You stopped at ${fmt(pos)}" + if (dur > 0) " of ${fmt(dur)}." else "."
+        showDialog("Continue watching?", text,
+            "Resume from ${fmt(pos)}", { startPlayback(pos, transcoding) },
+            "Start over", { resumeMs = 0; lastPosMs = 0; startPlayback(0, transcoding) }) { finishWithResult(null) }
+    }
+
+    /** Saves the watch position natively (see ResumeStore) so it survives Home, power-off or a crash. */
+    private fun persistResume() {
+        val pos = lastPosMs / 1000.0
+        val dur = durationMs() / 1000.0
+        val watched = ended || (dur > 0 && pos > dur - 45)
+        if (!watched && pos < 5) return
+        ResumeStore.save(this, req.id, pos, dur, watched)
     }
 
     private fun hideSystemUi() {
@@ -220,7 +261,7 @@ class PlayerActivity : FragmentActivity() {
             loadCuesIfNeeded()
         } else {
             offsetMs = 0
-            val subs = req.subtitles.mapIndexed { i, s ->
+            val side = req.subtitles.mapIndexed { i, s ->
                 MediaItem.SubtitleConfiguration.Builder(Uri.parse(s.url))
                     .setMimeType(MimeTypes.TEXT_VTT)
                     .setLabel(s.label)
@@ -228,7 +269,7 @@ class PlayerActivity : FragmentActivity() {
                     .setSelectionFlags(0)
                     .build()
             }
-            exo.setMediaItem(MediaItem.Builder().setUri(req.streamUrl).setSubtitleConfigurations(subs).build(), positionMs)
+            exo.setMediaItem(MediaItem.Builder().setUri(req.streamUrl).setSubtitleConfigurations(side).build(), positionMs)
             loadCuesIfNeeded()      // only does something when a subtitle offset is active
         }
         // Subtitles off by default; applySubtitle() switches the chosen track on once ExoPlayer lists it.
@@ -399,7 +440,7 @@ class PlayerActivity : FragmentActivity() {
     private fun selectSubtitle(index: Int) {
         subChoice = index
         val ed = prefs.edit().putBoolean(KEY_SUBS_ON, index >= 0)
-        if (index >= 0) ed.putString(KEY_SUB_LABEL, req.subtitles[index].label)
+        if (index >= 0) ed.putString(KEY_SUB_LABEL, subs[index].label)
         ed.apply()
         loadCuesIfNeeded()
         if (!transcoding) applySubtitle()
@@ -418,7 +459,7 @@ class PlayerActivity : FragmentActivity() {
             val g = exo.currentTracks.groups.firstOrNull { grp ->
                 grp.type == C.TRACK_TYPE_TEXT && grp.length > 0 && (
                     grp.getTrackFormat(0).id == "sub$subChoice" ||
-                    grp.getTrackFormat(0).label == req.subtitles[subChoice].label)
+                    grp.getTrackFormat(0).label == subs[subChoice].label)
             } ?: return
             params.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
                 .setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, 0))
@@ -428,13 +469,13 @@ class PlayerActivity : FragmentActivity() {
     }
 
     /** Transcode mode: download the cue list of the chosen track (the .vtt url without ".vtt" is the JSON one). */
-    private fun loadCuesIfNeeded() {
+    private fun loadCuesIfNeeded(force: Boolean = false) {
         if (subChoice < 0) { cueJob?.cancel(); cues = emptyList(); cuesFor = -1; return }
-        if (!ownCues() || cuesFor == subChoice) return
+        if ((!force && !ownCues()) || cuesFor == subChoice) return
         cueJob?.cancel()
         cues = emptyList()
         cuesFor = subChoice
-        val url = req.subtitles[subChoice].url.removeSuffix(".vtt")
+        val url = subs[subChoice].url.removeSuffix(".vtt")
         cueJob = lifecycleScope.launch {
             try {
                 // Embedded subtitles are extracted by ffmpeg on the server, which can take a while.
@@ -446,18 +487,26 @@ class PlayerActivity : FragmentActivity() {
         }
     }
 
-    /** True when we draw the subtitle lines ourselves: converted stream, or a sync offset is set. */
-    private fun ownCues() = transcoding || subOffsetMs != 0L
+    /**
+     * True when we draw the subtitle lines ourselves: converted stream, a sync offset is set, or the track was
+     * picked with "Browse subtitle files" (ExoPlayer only knows the tracks that were side-loaded at start).
+     */
+    private fun ownCues() = transcoding || subOffsetMs != 0L || subChoice >= req.subtitles.size
 
     /** Subtitle sync. Positive = subtitles later (delay), negative = earlier. Saved per movie. */
-    private fun setSubOffset(ms: Long) {
+    private fun applyOffset(ms: Long) {
+        val was = ownCues()
         subOffsetMs = ms.coerceIn(-60_000L, 60_000L)
-        prefs.edit().putLong(KEY_SUB_OFFSET + req.id, subOffsetMs).apply()
-        loadCuesIfNeeded()
-        if (!transcoding) { appliedSub = Int.MIN_VALUE; applySubtitle() }   // switch ExoPlayer's own track on/off
-        b.subText.visibility = View.GONE
-        updateUi()
+        // Only when we switch between ExoPlayer's subtitles and ours does anything heavy happen.
+        if (was != ownCues()) {
+            loadCuesIfNeeded()
+            if (!transcoding) { appliedSub = Int.MIN_VALUE; applySubtitle() }
+        }
+        updateSyncUi()
+        drawCue()
     }
+
+    private fun commitOffset() { prefs.edit().putLong(KEY_SUB_OFFSET + req.id, subOffsetMs).apply() }
 
     private fun offsetText(ms: Long): String =
         if (ms == 0L) "0.0s" else String.format(Locale.US, "%+.1fs", ms / 1000.0)
@@ -486,31 +535,201 @@ class PlayerActivity : FragmentActivity() {
 
     // ── menus (subtitles / audio) ─────────────────────────────────────────────
 
-    private class MenuEntry(val label: String, val checked: Boolean, val keepOpen: Boolean = false, val onPick: () -> Unit)
+    /** [keep] = the pick opens another screen inside the same panel, so the panel must not be closed first. */
+    private class MenuEntry(val label: String, val checked: Boolean, val keep: Boolean = false, val onPick: () -> Unit)
 
     private fun openSubtitleMenu() {
         val items = ArrayList<MenuEntry>()
         items.add(MenuEntry("Off", subChoice < 0) { selectSubtitle(-1) })
-        req.subtitles.forEachIndexed { i, s -> items.add(MenuEntry(s.label, subChoice == i) { selectSubtitle(i) }) }
-        items.add(MenuEntry("Subtitle sync:  " + offsetText(subOffsetMs), false) { openSyncMenu(0) })
+        subs.forEachIndexed { i, s -> items.add(MenuEntry(s.label, subChoice == i) { selectSubtitle(i) }) }
+        items.add(MenuEntry("Browse subtitle files...", false, keep = true) { openSubtitleBrowser() })
+        items.add(MenuEntry("Subtitle sync:  " + offsetText(subOffsetMs), false, keep = true) { openSyncMenu(b.bSubs) { openSubtitleMenu() } })
         openMenu("Subtitles", items, b.bSubs)
     }
 
-    /** Subtitle sync (delay / faster). Picking a row changes the offset and keeps the menu open. */
-    private fun openSyncMenu(focusIdx: Int) {
-        val steps = listOf(
-            "Delay (subtitles later)   +0.1s" to 100L, "Delay (subtitles later)   +0.5s" to 500L, "Delay (subtitles later)   +1s" to 1000L,
-            "Faster (subtitles earlier)   -0.1s" to -100L, "Faster (subtitles earlier)   -0.5s" to -500L, "Faster (subtitles earlier)   -1s" to -1000L)
-        val items = ArrayList<MenuEntry>()
-        steps.forEachIndexed { i, (label, d) ->
-            items.add(MenuEntry(label, false, true) {
-                setSubOffset(subOffsetMs + d)
-                if (subChoice < 0) showMsg("Turn a subtitle on to see the change.")
-                openSyncMenu(i)
-            })
+    // ── subtitle sync panel: [+] value [-] ─────────────────────────────────────
+
+    private var syncOn = false
+    private var syncPlus: Button? = null
+    private var syncMinus: Button? = null
+    private var syncValue: TextView? = null
+    private var syncHint: TextView? = null
+    private var holdDir = 0
+
+    /**
+     * Two big buttons, + (subtitles later) above and - (subtitles earlier) below, 0.1 s per step. Pressing OK once
+     * moves one step; HOLDING OK keeps stepping until the key is released. The stepping is driven by our own timer
+     * (not by the remote's key-repeat, which differs from TV to TV), and while it runs only a text label and the
+     * subtitle line are updated, so it stays smooth. The value is saved when the key is released.
+     */
+    private fun openSyncMenu(opener: View, back: () -> Unit) {
+        loadCuesIfNeeded(true)          // fetch the lines now so the first step shows up at once
+        beginMenu("Subtitle sync", opener)
+        menuBackTo = back
+        syncOn = true
+        val lp = { LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(4) } }
+
+        fun stepButton(label: String, dir: Int) = menuButton(label, false).apply {
+            gravity = Gravity.CENTER
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
+            minimumHeight = dp(60)
+            setOnClickListener { applyOffset(subOffsetMs + dir * 100L); commitOffset() }   // touch / mouse; the remote is handled in dispatchKeyEvent
         }
-        items.add(MenuEntry("Reset to 0", subOffsetMs == 0L, true) { setSubOffset(0); openSyncMenu(steps.size) })
-        openMenu("Subtitle sync:  " + offsetText(subOffsetMs), items, b.bSubs, focusIdx)
+        val plus = stepButton("+  0.1s   (subtitles later)", 1)
+        val minus = stepButton("-  0.1s   (subtitles earlier)", -1)
+        val value = TextView(this).apply {
+            gravity = Gravity.CENTER
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 34f)
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setTextColor(ContextCompat.getColor(this@PlayerActivity, R.color.white))
+        }
+        val hint = TextView(this).apply {
+            gravity = Gravity.CENTER
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+            setTextColor(ContextCompat.getColor(this@PlayerActivity, R.color.muted))
+        }
+        val reset = menuButton("Reset to 0", false).apply { gravity = Gravity.CENTER; setOnClickListener { applyOffset(0); commitOffset() } }
+        b.menuList.addView(plus, lp())
+        b.menuList.addView(value, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(2) })
+        b.menuList.addView(hint, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(8) })
+        b.menuList.addView(minus, lp())
+        b.menuList.addView(reset, lp())
+        syncPlus = plus; syncMinus = minus; syncValue = value; syncHint = hint
+        updateSyncUi()
+        if (subChoice < 0) showMsg("Turn a subtitle on to see the change.")
+        showMenu(plus)
+    }
+
+    private fun updateSyncUi() {
+        val v = syncValue ?: return
+        v.text = offsetText(subOffsetMs)
+        v.setTextColor(when {
+            subOffsetMs > 0 -> 0xFF7BE0A0.toInt()
+            subOffsetMs < 0 -> 0xFFFFB27B.toInt()
+            else -> ContextCompat.getColor(this, R.color.white)
+        })
+        syncHint?.text = when {
+            subOffsetMs == 0L -> "In sync.  Hold OK on + or - to keep going."
+            subOffsetMs > 0 -> "Subtitles appear later.  Hold OK to keep going."
+            else -> "Subtitles appear earlier.  Hold OK to keep going."
+        }
+    }
+
+    private val holdTick = object : Runnable {
+        override fun run() {
+            if (holdDir == 0) return
+            applyOffset(subOffsetMs + holdDir * 100L)
+            ui.postDelayed(this, 70)             // ~14 steps a second
+        }
+    }
+
+    private fun startHold(dir: Int) {
+        stopHold()
+        holdDir = dir
+        applyOffset(subOffsetMs + dir * 100L)    // first press = exactly one step
+        ui.postDelayed(holdTick, 400)            // then, if still held, keep going
+    }
+
+    private fun stopHold() {
+        if (holdDir == 0) return
+        holdDir = 0
+        ui.removeCallbacks(holdTick)
+        commitOffset()
+    }
+
+    // ── subtitle file browser (files in the server's subtitle folder) ─────────
+
+    private var browseJob: Job? = null
+    private var browseSearchRun: Runnable? = null
+
+    private fun serverBase(): String { val u = java.net.URI(req.streamUrl); return "${u.scheme}://${u.authority}" }
+
+    private fun menuNote(text: String) = TextView(this).apply {
+        this.text = text; setTextColor(ContextCompat.getColor(this@PlayerActivity, R.color.muted)); textSize = 17f; setPadding(dp(8), dp(10), dp(8), dp(10))
+    }
+
+    /** Same panel as the subtitle list: a search box plus the subtitle files the server knows about. */
+    private fun openSubtitleBrowser() {
+        beginMenu("Subtitle files", b.bSubs)
+        menuBackTo = { openSubtitleMenu() }
+        val search = EditText(this).apply {
+            hint = "Search subtitle files..."
+            setSingleLine()
+            imeOptions = EditorInfo.IME_ACTION_SEARCH
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+            setTextColor(ContextCompat.getColor(this@PlayerActivity, R.color.white))
+            setHintTextColor(ContextCompat.getColor(this@PlayerActivity, R.color.muted))
+            setBackgroundResource(R.drawable.bg_input)
+            setPadding(dp(14), 0, dp(14), 0)
+            minimumHeight = dp(50)
+        }
+        val results = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        b.menuList.addView(search, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(50)).apply { bottomMargin = dp(8) })
+        b.menuList.addView(results, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+
+        fun load(q: String) {
+            browseJob?.cancel()
+            results.removeAllViews()
+            results.addView(menuNote("Loading..."))
+            browseJob = lifecycleScope.launch {
+                try {
+                    val txt = withContext(Dispatchers.IO) {
+                        Http.getText(serverBase() + "/api/subtitle-library?q=" + URLEncoder.encode(q, "UTF-8"), 4000, 15_000)
+                    }
+                    val arr = JSONArray(txt)
+                    results.removeAllViews()
+                    if (arr.length() == 0) {
+                        results.addView(menuNote(if (q.isEmpty()) "No subtitle files found. Set the subtitle folder in the LocalFlix settings."
+                                                 else "No files match that search."))
+                    }
+                    for (i in 0 until arr.length()) {
+                        val o = arr.getJSONObject(i)
+                        val name = o.optString("name"); val lang = o.optString("lang"); val ext = o.optString("ext")
+                        val detail = listOf(lang, ext.uppercase()).filter { it.isNotEmpty() }.joinToString(" · ")
+                        val btn = menuButton(name + if (detail.isNotEmpty()) "   ($detail)" else "", false).apply {
+                            setOnClickListener {
+                                pickLibrarySubtitle(SubTrack(name.replace(Regex("\\.[^.]+$"), ""), lang, serverBase() + "/api/subtitle/" + o.getString("id") + ".vtt"))
+                            }
+                        }
+                        results.addView(btn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(4) })
+                    }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    results.removeAllViews()
+                    results.addView(menuNote("Could not read the subtitle folder from the server."))
+                }
+            }
+        }
+        search.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, a: Int, c: Int, d: Int) {}
+            override fun onTextChanged(s: CharSequence?, a: Int, c: Int, d: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                browseSearchRun?.let { ui.removeCallbacks(it) }
+                val r = Runnable { load(s?.toString()?.trim() ?: "") }
+                browseSearchRun = r
+                ui.postDelayed(r, 350)
+            }
+        })
+        search.setOnEditorActionListener { v, _, _ ->
+            hideIme(v)
+            (results.getChildAt(0) as? Button)?.requestFocus()
+            true
+        }
+        load("")
+        showMenu(search)
+    }
+
+    private fun pickLibrarySubtitle(t: SubTrack) {
+        var i = subs.indexOfFirst { it.url == t.url }
+        if (i < 0) { subs.add(t); i = subs.lastIndex }
+        closeMenu()
+        selectSubtitle(i)
+        showMsg("Subtitles: " + t.label)
+    }
+
+    private fun hideIme(v: View) {
+        (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(v.windowToken, 0)
     }
 
     private fun openAudioMenu() {
@@ -551,7 +770,7 @@ class PlayerActivity : FragmentActivity() {
                 showMsg(if (x == 1f) "Normal speed" else "Speed ${x}x")
             })
         }
-        items.add(MenuEntry("Subtitle sync:  " + offsetText(subOffsetMs), false) { openSyncMenu(0) })
+        items.add(MenuEntry("Subtitle sync:  " + offsetText(subOffsetMs), false, keep = true) { openSyncMenu(b.bSet) { openSettingsMenu() } })
         for ((label, pct) in listOf("Small" to 80, "Normal" to 100, "Large" to 130, "Huge" to 170)) {
             items.add(MenuEntry("Subtitle size:  $label", subSizePct == pct) {
                 subSizePct = pct
@@ -564,41 +783,60 @@ class PlayerActivity : FragmentActivity() {
 
     private fun channelsText(ch: Int) = when { ch <= 0 -> ""; ch == 1 -> "Mono"; ch == 2 -> "Stereo"; ch == 6 -> "5.1"; ch == 8 -> "7.1"; else -> "$ch ch" }
 
-    private fun openMenu(title: String, items: List<MenuEntry>, opener: View, focusIdx: Int = -1) {
+    private var menuBackTo: (() -> Unit)? = null     // Back inside a sub screen (sync, file browser) returns here
+
+    private fun menuButton(text: String, checked: Boolean): Button = Button(this).apply {
+        this.text = text
+        isAllCaps = false
+        gravity = Gravity.START or Gravity.CENTER_VERTICAL
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+        setTextColor(if (checked) ContextCompat.getColor(this@PlayerActivity, R.color.white) else 0xCCFFFFFF.toInt())
+        setBackgroundResource(R.drawable.bg_menu_item)
+        stateListAnimator = null
+        minimumHeight = dp(50)
+        setPadding(dp(14), 0, dp(14), 0)
+    }
+
+    /** Clears the panel for new content. Used by every screen inside it. */
+    private fun beginMenu(title: String, opener: View) {
+        stopHold()
+        syncOn = false
+        browseJob?.cancel()
+        menuBackTo = null
         menuOpener = opener
         b.menuTitle.text = title
         b.menuList.removeAllViews()
-        var focusTarget: View? = null
-        if (items.isEmpty()) {
-            b.menuList.addView(android.widget.TextView(this).apply {
-                text = "Nothing to choose from."; setTextColor(ContextCompat.getColor(this@PlayerActivity, R.color.muted)); textSize = 18f
-            })
-        }
-        for ((idx, e) in items.withIndex()) {
-            val btn = Button(this).apply {
-                text = (if (e.checked) "✓    " else "       ") + e.label
-                isAllCaps = false
-                gravity = Gravity.START or Gravity.CENTER_VERTICAL
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
-                setTextColor(if (e.checked) ContextCompat.getColor(this@PlayerActivity, R.color.white) else 0xCCFFFFFF.toInt())
-                setBackgroundResource(R.drawable.bg_menu_item)
-                stateListAnimator = null
-                minimumHeight = dp(50)
-                setPadding(dp(14), 0, dp(14), 0)
-                setOnClickListener { if (!e.keepOpen) closeMenu(); e.onPick() }
-            }
-            b.menuList.addView(btn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(4) })
-            if (focusIdx >= 0) { if (idx == focusIdx) focusTarget = btn }
-            else if (e.checked || focusTarget == null) focusTarget = btn   // focus the current choice, else the first row
-        }
+    }
+
+    private fun showMenu(focus: View?) {
         menuOn = true
         ui.removeCallbacks(hideRunnable)
         b.menuPanel.visibility = View.VISIBLE
         updateBigPlay()
-        focusTarget?.requestFocus()
+        focus?.requestFocus()
+    }
+
+    private fun openMenu(title: String, items: List<MenuEntry>, opener: View) {
+        beginMenu(title, opener)
+        var focusTarget: View? = null
+        if (items.isEmpty()) b.menuList.addView(menuNote("Nothing to choose from."))
+        for (e in items) {
+            val btn = menuButton((if (e.checked) "✓    " else "       ") + e.label, e.checked).apply {
+                setOnClickListener { if (!e.keep) closeMenu(); e.onPick() }
+            }
+            b.menuList.addView(btn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(4) })
+            if (e.checked || focusTarget == null) focusTarget = btn   // focus the current choice, else the first row
+        }
+        showMenu(focusTarget)
     }
 
     private fun closeMenu() {
+        stopHold()
+        syncOn = false
+        browseJob?.cancel()
+        menuBackTo = null
+        browseSearchRun?.let { ui.removeCallbacks(it) }
+        hideIme(b.menuPanel)
         menuOn = false
         b.menuPanel.visibility = View.GONE
         menuOpener?.requestFocus()
@@ -699,6 +937,7 @@ class PlayerActivity : FragmentActivity() {
     private val tick = object : Runnable {
         override fun run() {
             updateUi()
+            if (++saveTicks % 20 == 0 && player != null && !dialogOn) persistResume()    // every ~5 s while open
             ui.postDelayed(this, 250)
         }
     }
@@ -750,6 +989,18 @@ class PlayerActivity : FragmentActivity() {
             KeyEvent.KEYCODE_MEDIA_STOP -> { if (down) finishWithResult(null); return true }
         }
 
+        // Subtitle sync panel: holding OK on + / - keeps stepping until the key is released.
+        if (syncOn && menuOn) {
+            val okKey = k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER || k == KeyEvent.KEYCODE_NUMPAD_ENTER || k == KeyEvent.KEYCODE_BUTTON_A
+            val f = currentFocus
+            if (okKey && (f === syncPlus || f === syncMinus)) {
+                if (down) { if (e.repeatCount == 0) startHold(if (f === syncPlus) 1 else -1) }   // key-repeat events are ignored: our timer does the repeating
+                else stopHold()
+                return true
+            }
+            if (down && holdDir != 0) stopHold()      // any other key ends a hold
+        }
+
         // Menu or dialog open: normal focus navigation between their buttons.
         if (dialogOn || menuOn) return super.dispatchKeyEvent(e)
 
@@ -794,7 +1045,7 @@ class PlayerActivity : FragmentActivity() {
     private fun onBackKey() {
         when {
             dialogOn -> dialogCancel?.invoke()
-            menuOn -> closeMenu()
+            menuOn -> { val back = menuBackTo; if (back != null) back() else closeMenu() }
             controlsOn -> hideControls()
             else -> finishWithResult(null)
         }

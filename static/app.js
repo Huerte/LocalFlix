@@ -33,7 +33,25 @@
     _all() { return store.get('lf.progress', {}) || {}; },
     get(id) { return this._all()[id]; },
     set(id, t, dur) { const a = this._all(); a[id] = { t, d: dur, ts: Date.now() }; store.set('lf.progress', a); },
-    markWatched(id) { const a = this._all(); if (a[id]) { a[id].watched = true; a[id].t = null; } else { a[id] = { watched: true }; } store.set('lf.progress', a); },
+    markWatched(id) { const a = this._all(); if (a[id]) { a[id].watched = true; a[id].t = null; a[id].ts = Date.now(); } else { a[id] = { watched: true, ts: Date.now() }; } store.set('lf.progress', a); },
+    // Movies that can be continued, most recently watched first.
+    resumable() {
+      const a = this._all();
+      return Object.keys(a).filter((id) => { const p = a[id]; return p && !p.watched && p.t > 10 && p.d && p.t < p.d - 30; })
+        .sort((x, y) => (a[y].ts || 0) - (a[x].ts || 0));
+    },
+  };
+  // TV app: positions saved by the native player (it writes them every few seconds, even when the page never hears
+  // about the player closing, and they survive a changed server address). Keep whichever record is newer.
+  LF.importNativeProgress = function (all) {
+    const a = LF.progress._all(); let changed = false;
+    Object.keys(all || {}).forEach((id) => {
+      const n = all[id], cur = a[id];
+      if (!n || !n.ts || (cur && (cur.ts || 0) >= n.ts)) return;
+      a[id] = n.w ? { watched: true, t: null, ts: n.ts } : { t: n.t, d: n.d, ts: n.ts };
+      changed = true;
+    });
+    if (changed) store.set('lf.progress', a);
   };
 
   /* ---- modal system ---- */
@@ -227,6 +245,7 @@
           </div>
         </div>
       </div>
+      ${rowHtml('Continue Watching', LF.progress.resumable().map(byId).filter(Boolean), 12)}
       ${rowHtml('Recently Added', recent30, 16)}
       ${rowHtml('All Movies', movies.slice().sort((a, b) => a._k.localeCompare(b._k)), 24)}
       ${folderRows}
@@ -238,7 +257,7 @@
       const a = document.activeElement;
       if (!a || a === document.body) {
         const prev = prevId && $('.card[data-id="' + prevId + '"]');
-        const p = prev || $('.hero .btn.primary'); if (p) p.focus({ preventScroll: true });
+        const p = prev || $('#row-ContinueWatching .card') || $('.hero .btn.primary'); if (p) p.focus({ preventScroll: true });
       }
     }, 60);
   }
@@ -375,7 +394,13 @@
             ${m.folder ? `<dt>Folder</dt><dd>${esc(m.folder)}</dd>` : ''}
           </dl>
           <div class="actions" style="margin-top:20px">
-            <a class="btn primary" href="#/watch/${m.id}" id="dPlay"><svg class="ic"><use href="#i-play"/></svg>Play</a>
+            ${(() => {
+              // Saved position: "Resume 12:34" continues at once, "Start over" begins at 0.
+              const p = LF.progress.get(m.id);
+              if (!(p && !p.watched && p.t > 10 && p.d && p.t < p.d - 30)) return `<a class="btn primary" href="#/watch/${m.id}" id="dPlay"><svg class="ic"><use href="#i-play"/></svg>Play</a>`;
+              return `<a class="btn primary" href="#/watch/${m.id}?t=${Math.floor(p.t)}" id="dPlay"><svg class="ic"><use href="#i-play"/></svg>Resume ${LF.fmtTime(p.t)}</a>
+                      <a class="btn ghost" href="#/watch/${m.id}?t=0" id="dStart">Start over</a>`;
+            })()}
           </div>
           <div id="dSubs" style="margin-top:16px;color:var(--muted);font-size:.93rem">${m.subs ? `${m.subs} subtitle file${m.subs > 1 ? 's' : ''} available` : ''}</div>
         </div>
@@ -939,6 +964,7 @@
   LF.start = async function () {
     setupSearch();
     if (LF.app) setupTv();
+    if (LF.app) { try { LF.importNativeProgress(JSON.parse(window.LocalFlixTV.getResume())); } catch { /* older app build: no bridge method */ } }
     $('#main').innerHTML = '<div class="page"><div class="grid" style="margin-top:40px">' + '<div class="skel"></div>'.repeat(20) + '</div></div>';
     window.addEventListener('hashchange', () => { LF.routed = true; route(); });
     const ok = await LF.load(false);

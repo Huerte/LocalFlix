@@ -130,7 +130,8 @@
     // Same resume rule as the web player (see P.open below).
     const prog = LF.progress.get(movie.id);
     const resumable = prog && prog.t > 10 && prog.d && prog.t < prog.d - 30;
-    const startAt = opts && opts.startAt != null && !isNaN(opts.startAt) ? opts.startAt : (resumable ? prog.t : 0);
+    const explicitStart = !!(opts && opts.startAt != null && !isNaN(opts.startAt));
+    const startAt = explicitStart ? opts.startAt : (resumable ? prog.t : 0);
     // Subtitle list: same tracks the web player offers, as absolute WebVTT URLs.
     const subtitles = ((det && det.tracks) || []).map((t) => ({
       label: t.label, lang: t.lang || '', url: abs('/api/subtitle/' + t.id + '.vtt') }));
@@ -151,6 +152,7 @@
       startSeconds: startAt || 0, duration: dur, subtitles, audio,
       nextId: det && det.next ? det.next : null, nextTitle: nx ? nx.title : null,
       ffmpeg: !!(LF.info && LF.info.ffmpeg),
+      askResume: !explicitStart && !!resumable,   // the TV player then asks "Resume / Start over"
     };
     try { window.LocalFlixTV.play(JSON.stringify(payload)); } catch { LF.toast('Could not start the TV player.'); }
     // Leave the #/watch/ID URL (like P.close does) so the page underneath is ready when the native player closes.

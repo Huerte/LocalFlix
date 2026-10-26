@@ -134,7 +134,21 @@
   const nativeDur = {};
   async function openNative(movie, opts) {
     let det = null;
-    try { det = await LF.api('/api/movies/' + movie.id); } catch { det = null; }
+    // The details request doubles as the "is the laptop there?" check before the TV player opens.
+    const slow = setTimeout(() => LF.toast('Connecting to your laptop...'), 1500);
+    try { det = await LF.api('/api/movies/' + movie.id); }
+    catch (err) {
+      det = null;
+      if (err && err.offline) {
+        clearTimeout(slow);
+        // Back to the page underneath (the page keeps working from what it already knows), then explain kindly.
+        location.replace('#' + (LF.pageHash || '/'));
+        setTimeout(() => LF.notice({ keepHash: true, title: 'Cannot play right now', text: LF.OFFLINE_MSG,
+          retry: () => P.open(movie, opts) }), 120);
+        return;
+      }
+    }
+    clearTimeout(slow);
     const abs = (path) => location.origin + path;
     // Same resume rule as the web player (see P.open below).
     const prog = LF.progress.get(movie.id);

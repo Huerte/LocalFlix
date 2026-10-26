@@ -23,6 +23,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import org.json.JSONArray
+import org.json.JSONObject
 import java.net.URLEncoder
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
@@ -45,6 +46,7 @@ import androidx.media3.ui.SubtitleView
 import com.sarge.localflix.databinding.ActivityPlayerBinding
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
@@ -83,6 +85,14 @@ class PlayerActivity : FragmentActivity() {
     private var resultSet = false
     private var askedResume = false       // the "Resume / Start over" question is asked once per opening
     private var saveTicks = 0
+
+    // ── lost connection to the laptop ─────────────────────────────────────────
+    // While the buffer lasts the movie simply keeps playing. When it runs dry and the laptop does not answer,
+    // the player waits ("Connection lost") and continues from the same spot as soon as the laptop is back.
+    private var reconnecting = false
+    private var reconnectJob: Job? = null
+    private var checkingError = false      // an error is being examined: is it the file, or the laptop?
+    private var netRetries = 0             // quick retries after a network hiccup while the laptop is still there
 
     // ── subtitles ─────────────────────────────────────────────────────────────
     // Tracks the player offers: the movie's own ones first, then any file picked with "Browse subtitle files".
@@ -160,6 +170,8 @@ class PlayerActivity : FragmentActivity() {
     override fun onStart() {
         super.onStart()
         if (!::req.isInitialized) return
+        // Coming back after Home while waiting for the laptop: keep waiting (the dialog is still on screen).
+        if (reconnecting) { startReconnectLoop(true); ui.post(tick); return }
         // First start, or coming back after Home / another app: continue where we were.
         if (player == null && !dialogOn) {
             if (req.askResume && !askedResume && resumeMs > 10_000) { askedResume = true; promptResume() }
@@ -172,6 +184,7 @@ class PlayerActivity : FragmentActivity() {
         super.onStop()
         if (!::req.isInitialized) return
         stopHold()
+        reconnectJob?.cancel()
         captureState()
         persistResume()
         releasePlayer()
@@ -304,6 +317,9 @@ class PlayerActivity : FragmentActivity() {
     private val listener = object : Player.Listener {
         override fun onPlaybackStateChanged(state: Int) {
             b.spinner.visibility = if (state == Player.STATE_BUFFERING) View.VISIBLE else View.GONE
+            ui.removeCallbacks(stallCheck)
+            if (state == Player.STATE_BUFFERING) ui.postDelayed(stallCheck, STALL_MS)
+            if (state == Player.STATE_READY) netRetries = 0
             if (state == Player.STATE_ENDED) onEnded()
             updatePlayButton()
         }
@@ -330,7 +346,40 @@ class PlayerActivity : FragmentActivity() {
         startPlayback(logicalPos(), true)
     }
 
+    /**
+     * Something went wrong. Before blaming the file (or converting it), find out whether the laptop is still there.
+     * Gone -> wait for it. There but a network hiccup -> quietly try again. Otherwise it really is the file.
+     */
     private fun onPlayError(error: PlaybackException) {
+        if (reconnecting || checkingError) return
+        checkingError = true
+        b.spinner.visibility = View.VISIBLE
+        lifecycleScope.launch {
+            val alive = serverAlive()
+            checkingError = false
+            if (isFinishing || isDestroyed || player == null || reconnecting) return@launch
+            when {
+                !alive -> connectionLost()
+                isNetworkError(error) && netRetries < 3 -> {
+                    netRetries++
+                    val pos = logicalPos()
+                    delay(1500)
+                    if (!isFinishing && !isDestroyed && !reconnecting && !dialogOn) startPlayback(pos, transcoding)
+                }
+                else -> handlePlayError(error)
+            }
+        }
+    }
+
+    private fun isNetworkError(e: PlaybackException) = when (e.errorCode) {
+        PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+        PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
+        PlaybackException.ERROR_CODE_IO_UNSPECIFIED,
+        PlaybackException.ERROR_CODE_TIMEOUT -> true
+        else -> false
+    }
+
+    private fun handlePlayError(error: PlaybackException) {
         if (canTranscode()) { fallbackToTranscode(); return }
         val why = when {
             transcoding -> "Even the converted video could not be opened. The file may be damaged or use an unusual format."
@@ -358,13 +407,25 @@ class PlayerActivity : FragmentActivity() {
 
     private fun onEnded() {
         val dur = durationMs()
-        // A converted stream that stops long before the end means ffmpeg died: that is an error, not "finished".
-        if (transcoding && dur > 0 && logicalPos() < dur - 20_000) {
+        // Stopped long before the end: either the laptop went away (wait for it) or, in converted mode, ffmpeg died.
+        if (dur > 0 && logicalPos() < dur - 20_000 && !reconnecting) {
             val pos = logicalPos()
-            showDialog("Playback stopped early", "The conversion stopped before the end of the movie.",
-                "Continue from here", { startPlayback(pos, true) }, "Close", { finishWithResult(null) }) { finishWithResult(null) }
+            lifecycleScope.launch {
+                val alive = serverAlive()
+                if (isFinishing || isDestroyed || player == null || reconnecting) return@launch
+                when {
+                    !alive -> connectionLost()
+                    transcoding -> showDialog("Playback stopped early", "The conversion stopped before the end of the movie.",
+                        "Continue from here", { startPlayback(pos, true) }, "Close", { finishWithResult(null) }) { finishWithResult(null) }
+                    else -> completeEnded()
+                }
+            }
             return
         }
+        completeEnded()
+    }
+
+    private fun completeEnded() {
         ended = true
         if (req.nextId != null) {
             showDialog("Up next", req.nextTitle ?: "Next episode",
@@ -372,6 +433,77 @@ class PlayerActivity : FragmentActivity() {
         } else {
             finishWithResult(null)
         }
+    }
+
+    // ── lost connection: wait for the laptop, then continue from the same spot ─
+
+    /** True when the LocalFlix server on the laptop answers. The blocking call runs off the main thread. */
+    private suspend fun serverAlive(): Boolean = withContext(Dispatchers.IO) {
+        try {
+            JSONObject(Http.getText(serverBase() + "/api/info", 2500, 3000)).optString("name") == "LocalFlix"
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /** Buffering for a while: is the Wi-Fi just slow, or is the laptop gone? */
+    private val stallCheck = object : Runnable {
+        override fun run() {
+            val self = this
+            val p = player ?: return
+            if (p.playbackState != Player.STATE_BUFFERING || reconnecting || dialogOn) return
+            lifecycleScope.launch {
+                if (isFinishing || isDestroyed || reconnecting) return@launch
+                val alive = serverAlive()
+                if (player?.playbackState != Player.STATE_BUFFERING || reconnecting) return@launch
+                if (!alive) connectionLost()
+                else ui.postDelayed(self, STALL_MS)      // slow, but the laptop is there: keep waiting, keep checking
+            }
+        }
+    }
+
+    private fun connectionLost() {
+        if (reconnecting || isFinishing || isDestroyed) return
+        ui.removeCallbacks(stallCheck)
+        captureState()              // remember the movie time and whether it was playing
+        persistResume()
+        releasePlayer()
+        reconnecting = true
+        b.spinner.visibility = View.GONE
+        showReconnectDialog()
+        startReconnectLoop(false)
+    }
+
+    private fun showReconnectDialog() {
+        showDialog("Connection lost",
+            "We can't reach your laptop right now.\n\nPlease make sure it is turned on and LocalFlix is running. " +
+                "We keep trying, and your movie continues from where it stopped as soon as it is back.",
+            "Try now", { showReconnectDialog(); startReconnectLoop(true) },
+            "Close", { stopReconnect(); finishWithResult(null) }) { stopReconnect(); finishWithResult(null) }
+    }
+
+    private fun startReconnectLoop(immediately: Boolean) {
+        reconnectJob?.cancel()
+        reconnectJob = lifecycleScope.launch {
+            if (!immediately) delay(RECONNECT_MS)
+            while (true) {
+                if (serverAlive()) { onReconnected(); return@launch }
+                delay(RECONNECT_MS)
+            }
+        }
+    }
+
+    private fun stopReconnect() {
+        reconnecting = false
+        reconnectJob?.cancel()
+    }
+
+    private fun onReconnected() {
+        reconnecting = false
+        netRetries = 0
+        hideDialog()
+        showMsg("Connected again", 2500)
+        startPlayback(lastPosMs, transcoding)      // same movie, same time, same mode
     }
 
     // ── time helpers ──────────────────────────────────────────────────────────
@@ -1081,6 +1213,8 @@ class PlayerActivity : FragmentActivity() {
 
     companion object {
         const val EXTRA_REQUEST = "request"
+        private const val STALL_MS = 8_000L        // buffering this long: check whether the laptop is still there
+        private const val RECONNECT_MS = 3_000L    // how often we look for the laptop after it was lost
         const val RESULT_ID = "id"
         const val RESULT_SECONDS = "seconds"
         const val RESULT_FINISHED = "finished"

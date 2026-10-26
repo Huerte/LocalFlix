@@ -10,9 +10,27 @@
     const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
     return h ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}` : `${m}:${String(sec).padStart(2, '0')}`;
   };
+  // Every request failure is turned into a message a non-technical person understands.
+  //   err.offline = true  -> the laptop could not be reached at all (turned off, LocalFlix closed, Wi-Fi gone)
+  //   err.friendly = true -> err.message is safe to show as it is
+  LF.OFFLINE_MSG = "We can't reach your laptop right now. Please make sure it is turned on and LocalFlix is running, then try again.";
+  LF.API_TIMEOUT = 7000;
   LF.api = async function (path, opts) {
-    const r = await fetch(path, opts);
-    if (!r.ok) { const t = await r.text().catch(() => ''); throw new Error(t || r.status); }
+    opts = opts || {};
+    // A dead laptop can leave a request hanging for a long time: give up after a few seconds (not for uploads).
+    const ctl = (!opts.body && !opts.signal && typeof AbortController !== 'undefined') ? new AbortController() : null;
+    const timer = ctl ? setTimeout(() => ctl.abort(), LF.API_TIMEOUT) : 0;
+    let r;
+    try { r = await fetch(path, ctl ? Object.assign({}, opts, { signal: ctl.signal }) : opts); }
+    catch (e) { const err = new Error(LF.OFFLINE_MSG); err.offline = true; err.friendly = true; throw err; }
+    finally { if (timer) clearTimeout(timer); }
+    if (!r.ok) {
+      const t = await r.text().catch(() => '');
+      if (r.status >= 500 || /^\s*</.test(t)) {
+        const err = new Error('LocalFlix ran into a problem. Please try again in a moment.'); err.friendly = true; throw err;
+      }
+      throw new Error(t || r.status);
+    }
     return r.json();
   };
 
@@ -91,8 +109,29 @@
     if (had && LF.app) LF.restoreFocus();
   }
   LF.closeOverlay = function () {
+    if (modalEl && modalEl._notice) { closeModal(); return; }      // a plain notice is not part of the page history
     if (modalEl) { closeModal(); if (LF.fromPage) history.back(); else location.hash = '#/'; }
     else if (LF.player && LF.player.active) { LF.player.close(); }
+  };
+  // Friendly "something is not available right now" window (TV and browser). o: { title, text, retry, keepHash }
+  //   keepHash: the page URL was already restored, so closing must not touch the browser history.
+  LF.notice = function (o) {
+    o = o || {};
+    const html = `<div class="modal sm"><div class="m-body"><div class="state" style="margin:0;padding:8px 0 0">
+        <svg class="ic"><use href="#i-alert"/></svg>
+        <h2 style="padding:0">${esc(o.title || 'Cannot reach your laptop')}</h2>
+        <p>${esc(o.text || LF.OFFLINE_MSG)}</p>
+        <div class="actions" style="justify-content:center;margin-top:8px">
+          ${o.retry ? '<button class="btn primary" type="button" id="nRetry">Try again</button>' : ''}
+          <button class="btn${o.retry ? '' : ' primary'}" type="button" id="nClose">Close</button>
+        </div></div></div></div>`;
+    const modal = openModal(html);
+    modal.el._notice = !!o.keepHash;
+    const rb = $('#nRetry', modal.el), cb = $('#nClose', modal.el);
+    cb.onclick = () => LF.closeOverlay();
+    if (rb) rb.onclick = () => { if (o.keepHash) closeModal(); else closeModal(true); o.retry(); };
+    const first = rb || cb; first.focus({ preventScroll: true }); modal.el._last = first;
+    return modal;
   };
   LF.toast = function (msg) {
     const t = document.createElement('div');
@@ -558,6 +597,10 @@
           if (btn) btn.textContent = 'Save & Rescan';
         }
       };
+    }, (err) => {
+      // The laptop did not answer: say so in plain words instead of silently doing nothing.
+      LF.notice({ title: err && err.offline ? 'Cannot reach your laptop' : 'Something went wrong',
+        text: err && err.friendly ? err.message : 'Settings could not be opened. Please try again.', retry: showSettings });
     });
   }
 

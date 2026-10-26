@@ -243,7 +243,7 @@ class MainActivity : FragmentActivity() {
 
             override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
                 if (request.isForMainFrame && errorResponse.statusCode >= 400) {
-                    pageError("The server answered with error ${errorResponse.statusCode}.")
+                    pageError("LocalFlix on your laptop ran into a problem.\nPlease try again in a moment.")
                 }
             }
 

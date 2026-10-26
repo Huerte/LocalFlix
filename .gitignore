@@ -36,3 +36,6 @@ htmlcov/
 .DS_Store
 Thumbs.db
 *.log
+
+# TV monitor settings (your Wi-Fi name and TV address)
+/tv_monitor.json

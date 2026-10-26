@@ -287,6 +287,21 @@ body:not(.pointer) .card:focus-visible .poster{
   box-shadow:0 0 0 4px var(--bg),0 0 0 7px var(--accent),0 16px 40px rgba(79,140,255,.45);
 }
 
+/* ---- LocalFlix Android TV app (html.lftv) ------------------ */
+/* Set by index.html / app.js only inside the TV app's WebView. Normal browsers never match these rules. */
+html.lftv,html.lftv *{cursor:none!important;-webkit-tap-highlight-color:transparent}
+/* Controls that make no sense with a remote (QR page, fullscreen/PiP live in the native player, row arrows, skip link) */
+html.lftv #btnQr,html.lftv #bFull,html.lftv #bPip,html.lftv .row-nav,html.lftv .skip{display:none!important}
+/* A WebView may not report :focus-visible for remote-driven focus, so style plain :focus as well */
+html.lftv :focus{outline:none;box-shadow:0 0 0 3px var(--bg),0 0 0 6px var(--accent)}
+html.lftv .card:focus{box-shadow:none;transform:translateY(-8px) scale(1.05)}
+html.lftv .card:focus .poster{box-shadow:0 0 0 4px var(--bg),0 0 0 7px var(--accent),0 16px 40px rgba(79,140,255,.5)}
+html.lftv .search input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(79,140,255,.28),0 0 0 6px var(--accent)}
+html.lftv .sg:focus{box-shadow:none}
+html.lftv .tabs a:focus{background:var(--surface3)}
+/* Cheaper compositing on low-end TV GPUs: the bar is already 92% opaque, so the blur is barely visible */
+html.lftv .topbar{backdrop-filter:none;-webkit-backdrop-filter:none;background:rgba(14,16,20,.97)}
+
 /* ---- responsive --------------------------------------- */
 @media (max-width:900px){
   .topbar{flex-wrap:wrap;gap:10px}

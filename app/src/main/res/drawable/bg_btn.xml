@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Button: grey normally, solid blue with a white ring while focused (the TV "cursor"). -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/accent" />
+            <stroke android:width="3dp" android:color="@color/white" />
+            <corners android:radius="10dp" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/surface3" />
+            <stroke android:width="1dp" android:color="@color/line" />
+            <corners android:radius="10dp" />
+        </shape>
+    </item>
+</selector>

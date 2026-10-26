@@ -1,7 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">LocalFlix</string>
-    <string name="search_hint">Search movies…</string>
-    <string name="no_server">Cannot reach server</string>
-    <string name="loading">Connecting…</string>
 </resources>

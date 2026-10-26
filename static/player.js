@@ -119,8 +119,55 @@
     }
   }
 
+  /* ---- Android TV app: hand playback to the native ExoPlayer ---- */
+  // Only runs inside the LocalFlix TV app (window.LocalFlixTV is injected by the app's WebView).
+  // Normal browsers never reach this code, so phones and laptops keep using the <video> player below.
+  const nativeDur = {};
+  async function openNative(movie, opts) {
+    let det = null;
+    try { det = await LF.api('/api/movies/' + movie.id); } catch { det = null; }
+    const abs = (path) => location.origin + path;
+    // Same resume rule as the web player (see P.open below).
+    const prog = LF.progress.get(movie.id);
+    const resumable = prog && prog.t > 10 && prog.d && prog.t < prog.d - 30;
+    const startAt = opts && opts.startAt != null && !isNaN(opts.startAt) ? opts.startAt : (resumable ? prog.t : 0);
+    // Subtitle list: same tracks the web player offers, as absolute WebVTT URLs.
+    const subtitles = ((det && det.tracks) || []).map((t) => ({
+      label: t.label, lang: t.lang || '', url: abs('/api/subtitle/' + t.id + '.vtt') }));
+    (((det && det.probe && det.probe.subs) || []).filter((x) => TEXT_SUB.indexOf(x.codec) >= 0)).forEach((x, i) => {
+      subtitles.push({ label: x.title || langName(x.lang) || 'Embedded ' + (i + 1), lang: x.lang || '',
+        url: abs('/api/embedded-subtitle/' + movie.id + '/' + x.n + '.vtt') });
+    });
+    // Audio tracks of the file (used by the native player when it has to switch to transcode mode).
+    const audio = (((det && det.probe && det.probe.audio) || [])).map((a) => ({
+      n: a.n, label: a.title || langName(a.lang) || 'Track ' + (a.n + 1), codec: a.codec || '', ch: a.ch || 0 }));
+    const nx = det && det.next ? LF.movies.find((x) => x.id === det.next) : null;
+    const dur = (det && det.dur) || movie.dur || 0;
+    nativeDur[movie.id] = dur;
+    const payload = {
+      id: movie.id, title: movie.title, year: movie.year || null,
+      streamUrl: abs('/media/' + movie.id), transcodeUrl: abs('/transcode/' + movie.id),
+      startSeconds: startAt || 0, duration: dur, subtitles, audio,
+      nextId: det && det.next ? det.next : null, nextTitle: nx ? nx.title : null,
+      ffmpeg: !!(LF.info && LF.info.ffmpeg),
+    };
+    try { window.LocalFlixTV.play(JSON.stringify(payload)); } catch { LF.toast('Could not start the TV player.'); }
+    // Leave the #/watch/ID URL (like P.close does) so the page underneath is ready when the native player closes.
+    location.replace('#' + (LF.pageHash || '/'));
+  }
+  // Called by the app when the native player closes. Stores resume progress exactly like saveProgress() does.
+  LF.onNativePlayerClosed = function (id, secs, finished, nextId) {
+    const dur = nativeDur[id] || (LF.movies.find((x) => x.id === id) || {}).dur || 0;
+    if (finished) LF.progress.markWatched(id);
+    else if (secs >= 5) { if (dur && secs > dur - 45) LF.progress.markWatched(id); else LF.progress.set(id, secs, dur); }
+    if (LF.restoreFocus) LF.restoreFocus();
+    // "Play next" was chosen in the native player: open it like goNext() does.
+    if (nextId) location.replace('#/watch/' + nextId);
+  };
+
   /* ---- open / close ---- */
   P.open = async function (movie, opts) {
+    if (window.LocalFlixTV) return openNative(movie, opts);
     init();
     if (P.active && m && m.id === movie.id) return;
     if (P.active) P.close(true);

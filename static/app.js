@@ -59,9 +59,12 @@
     return obj;
   }
   function closeModal(silent) {
+    const had = !!modalEl;
     if (modalEl) { modalEl.remove(); modalEl = null; }
     modals = [];
     if (!$('#player:not([hidden])')) document.body.classList.remove('noscroll');
+    // TV: the modal's own button just disappeared, so hand focus back to the card the user came from.
+    if (had && LF.app) LF.restoreFocus();
   }
   LF.closeOverlay = function () {
     if (modalEl) { closeModal(); if (LF.fromPage) history.back(); else location.hash = '#/'; }
@@ -75,7 +78,12 @@
   };
 
   /* ---- data ---- */
-  LF.movies = []; LF.info = null; LF.offline = false; LF.tv = /android|googletv|hbbtv|netcast/i.test(navigator.userAgent);
+  LF.movies = []; LF.info = null; LF.offline = false;
+  // LocalFlix Android TV app: the native wrapper adds "LocalFlixTV" to the user agent and injects window.LocalFlixTV.
+  // LF.app is false in every normal browser, so phones and laptops behave exactly as before.
+  LF.app = !!window.LocalFlixTV || navigator.userAgent.includes('LocalFlixTV');
+  LF.tv = LF.app || /android|googletv|hbbtv|netcast/i.test(navigator.userAgent);
+  if (LF.app) document.documentElement.classList.add('lftv');
   const norm = (s) => s.toLowerCase().replace(/[''`]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
   const sortKey = (s) => s.replace(/^(the|a|an)\s+/i, '').toLowerCase().replace(/(\d+)/g, (m) => m.padStart(6, '0'));
   function prep(list) {
@@ -197,6 +205,11 @@
       ${folderRows}
     </div>`;
     settleImages(main);
+    // TV remote: start with a visible focus ring on the main Play button (only if nothing else holds focus).
+    if (LF.app) setTimeout(() => {
+      const a = document.activeElement;
+      if (!a || a === document.body) { const p = $('.hero .btn.primary'); if (p) p.focus({ preventScroll: true }); }
+    }, 60);
   }
   const posters = { infoCache: null };
 
@@ -220,6 +233,8 @@
   function renderBrowse(q) {
     if (q) { bstate = Object.assign({}, bstate, q); }
     const main = $('#main');
+    // Re-rendering replaces the toolbar, so remember which toolbar control had focus (sort / order / subtitles).
+    const keepId = document.activeElement && /^f(Sort|Dir|Subs)$/.test(document.activeElement.id || '') ? document.activeElement.id : '';
     const filtered = applyBrowse(LF.movies);
     const dirIcon = bstate.dir === 'asc' ? '#i-up' : '#i-down';
     const dirLabel = bstate.dir === 'asc' ? 'A to Z' : 'Z to A';
@@ -245,10 +260,11 @@
       <div class="grid" id="bGrid">${filtered.length ? filtered.map(card).join('') : '<div class="state" style="margin:40px auto"><svg class="ic"><use href="#i-search"/></svg><h2>No results</h2><p>Try different keywords or remove filters.</p></div>'}</div>
     </div>`;
     settleImages(main);
-    // Auto-focus the first card for TV remote users
+    if (keepId) { const k = $('#' + keepId); if (k) { k.focus({ preventScroll: true }); return; } }
+    // Auto-focus the first card for TV remote users (but never pull focus out of the search box while typing)
     if (!document.body.classList.contains('pointer')) {
       const first = $('#bGrid .card', main);
-      if (first) setTimeout(() => first.focus({ preventScroll: true }), 80);
+      if (first) setTimeout(() => { if (document.activeElement !== sq()) first.focus({ preventScroll: true }); }, 80);
     }
   }
   LF._browse = (p) => { bstate = Object.assign({}, bstate, p); LF._bs = bstate; if (page === 'browse') renderBrowse(); };
@@ -296,6 +312,7 @@
     </div>`;
     const modal = openModal(html, { onClose: () => { if (LF.fromPage) {} } });
     settleImages(modal.el);
+    if (LF.app) setTimeout(() => { const pb = $('#dPlay', modal.el); if (pb) pb.focus({ preventScroll: true }); }, 30);
     // Load full details async
     LF.api('/api/movies/' + mid).then((d) => {
       const ovEl = $('#dOv', modal.el);
@@ -321,6 +338,7 @@
       const html = `<div class="modal sm"><button class="m-close" type="button" aria-label="Close" onclick="LF.closeOverlay()"><svg class="ic"><use href="#i-close"/></svg></button>
         <div class="m-body">
           <h2>Settings</h2>
+          ${LF.app ? '<div class="actions" style="margin:0 0 16px"><button class="btn" type="button" id="sChange">Change TV server...</button></div>' : ''}
           ${!s.can_edit ? '<div class="msg">Settings can only be changed from the computer running LocalFlix.</div>' : ''}
           <div id="sMsg"></div>
           <form id="sForm">
@@ -331,6 +349,8 @@
         </div>
       </div>`;
       const modal = openModal(html);
+      const chg = $('#sChange', modal.el);
+      if (chg) { chg.onclick = () => { try { window.LocalFlixTV.changeServer(); } catch { /* bridge missing */ } }; setTimeout(() => chg.focus({ preventScroll: true }), 30); }
       const form = $('#sForm', modal.el); if (!form) return;
       form.onsubmit = async (e) => {
         e.preventDefault();
@@ -415,6 +435,22 @@
     q.addEventListener('focus', () => renderSugg());
     q.addEventListener('keydown', (e) => {
       const open = !sg().hidden;
+      if (LF.app && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+        // TV: walk down the suggestion list without wrapping, then leave the field (the global handler moves focus).
+        const down = e.key === 'ArrowDown', next = sel + (down ? 1 : -1);
+        if (open && sugg_items.length && next >= 0 && next < sugg_items.length) {
+          e.preventDefault(); e.stopPropagation(); sel = next;
+          $$('.sg', sg()).forEach((b, i) => { b.setAttribute('aria-selected', i === sel); if (i === sel) b.scrollIntoView({ block: 'nearest' }); });
+          return;
+        }
+        if (!down && sel >= 0) {
+          e.preventDefault(); e.stopPropagation(); sel = -1;
+          $$('.sg', sg()).forEach((b) => b.setAttribute('aria-selected', 'false'));
+          return;
+        }
+        if (down) closeSugg();   // hide the dropdown so its rows are not picked as the next focus target
+        return;
+      }
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         if (!open) renderSugg(); if (!sugg_items.length) return;
         e.preventDefault(); e.stopPropagation();
@@ -475,7 +511,12 @@
       if (e.key === 'Backspace' || e.key === 'Escape') return;
     }
     if (e.key === '/' && !typing && !modalEl) { e.preventDefault(); sq().focus(); sq().select(); return; }
-    const dir = DIRS[e.key]; if (!dir || typing || tag === 'SELECT') return;
+    const dir = DIRS[e.key]; if (!dir) return;
+    if (LF.app && typing) {
+      // TV: arrows must be able to leave a text field. Left/Right still move the caret while there is text to move over.
+      const el = e.target;
+      try { if ((dir === 'left' && el.selectionStart > 0) || (dir === 'right' && el.selectionEnd < el.value.length)) return; } catch { /* type has no caret */ }
+    } else if (typing || (tag === 'SELECT' && !LF.app)) return;
     if (e.target.getAttribute && e.target.getAttribute('role') === 'slider') return;
     if (tag === 'INPUT' && e.target.type === 'range' && (dir === 'left' || dir === 'right')) return;
     const root = modalEl || document;
@@ -489,6 +530,64 @@
       else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
     }
   });
+
+  /* ---- Android TV app helpers (only active when LF.app) ---- */
+  // Remember the card the user was on so focus can return there after a modal or the native player closes.
+  document.addEventListener('focusin', (e) => {
+    const c = e.target.closest && e.target.closest('.card');
+    if (c) { LF.lastCardEl = c; LF.lastCardId = c.dataset.id; }
+  });
+  LF.restoreFocus = function () {
+    const a = document.activeElement;
+    if (a && a !== document.body && document.contains(a) && !a.closest('[hidden]')) return;
+    let el = LF.lastCardEl && document.contains(LF.lastCardEl) ? LF.lastCardEl : null;
+    if (!el && LF.lastCardId) el = $('.card[data-id="' + LF.lastCardId + '"]');
+    if (!el) el = $('.hero .btn.primary') || $('#bGrid .card') || $('.card');
+    if (el) el.focus({ preventScroll: true });
+  };
+  const overlayHash = () => /^\/(movie|watch|settings)/.test(location.hash.slice(1));
+  // True when pressing Back would have nothing left to close inside the page, i.e. the app may exit.
+  LF.isRoot = () => !modalEl && page !== 'browse' && !overlayHash() && sg().hidden && document.activeElement !== sq();
+  let lastRoot = null;
+  LF.reportRoot = function () {
+    if (!window.LocalFlixTV) return;
+    const r = LF.isRoot();
+    if (r !== lastRoot) { lastRoot = r; try { window.LocalFlixTV.atRoot(r); } catch { /* bridge missing */ } }
+  };
+  // The native Back key lands here first. Return true if the page used it, false if the app should exit.
+  LF.onNativeBack = function () {
+    if (!sg().hidden || document.activeElement === sq()) { closeSugg(); sq().blur(); return true; }
+    if (modalEl) { LF.closeOverlay(); return true; }
+    if (overlayHash()) { location.hash = '#/'; return true; }
+    if (page === 'browse') { location.hash = '#/'; return true; }
+    return false;
+  };
+  function setupTv() {
+    // 1. Tell the app whether Back would exit (hash change, focus change, modal open/close).
+    const rr = () => setTimeout(LF.reportRoot, 0);
+    window.addEventListener('hashchange', rr);
+    document.addEventListener('focusin', rr); document.addEventListener('focusout', rr);
+    new MutationObserver(rr).observe($('#modalRoot'), { childList: true });
+    rr();
+    // 2. Text fields: stay silent until OK is pressed, so merely moving over the search box does not pop up the keyboard.
+    const isText = (el) => el && el.tagName === 'INPUT' && /^(text|search|url|email|tel|password)$/.test(el.type || 'text');
+    document.addEventListener('focusin', (e) => { if (isText(e.target) && !e.target._kb) e.target.setAttribute('inputmode', 'none'); });
+    document.addEventListener('focusout', (e) => {
+      if (!isText(e.target)) return;
+      e.target._kb = false; e.target.setAttribute('inputmode', 'none');
+      try { window.LocalFlixTV.hideKeyboard(); } catch { /* bridge missing */ }
+    });
+    document.addEventListener('keydown', (e) => {
+      const t = e.target;
+      if (e.key !== 'Enter' || !isText(t) || t._kb) return;
+      if (t.id === 'q' && sel >= 0) return;            // OK on a highlighted suggestion opens it
+      e.preventDefault(); e.stopPropagation();          // first OK = open the on-screen keyboard
+      t._kb = true; t.setAttribute('inputmode', t.type === 'search' ? 'search' : 'text');
+      try { window.LocalFlixTV.showKeyboard(); } catch { /* bridge missing */ }
+    }, true);
+    // 3. The suggestion dropdown must never stay open over the page once focus has left the search box.
+    sq().addEventListener('blur', closeSugg);
+  }
 
   /* ---- routing ---- */
   LF.load = async function (render) {
@@ -508,7 +607,9 @@
     pollTimer = setTimeout(async () => {
       polls++;
       try {
-        const sig = (before) => LF.movies.map((m) => m.id + ':' + m.pv).join('|');
+        // Only a changed list of movies re-renders the page. A finished poster is swapped in place below,
+        // otherwise the page (and the TV focus ring) would be rebuilt every few seconds while posters download.
+        const sig = () => LF.movies.map((m) => m.id).join('|');
         const before = sig(); const old = new Map(LF.movies.map((m) => [m.id, m.pv]));
         const [movies, info] = await Promise.all([LF.api('/api/movies'), LF.api('/api/info')]);
         LF.movies = prep(movies); LF.info = info;
@@ -517,7 +618,7 @@
           if (old.get(m.id) === m.pv) return;
           document.querySelectorAll(`.poster[data-id="${m.id}"]`).forEach((p) => {
             const img = p.querySelector('img[data-p]'); if (img) img.remove();
-            const ph = p.querySelector('.ph'); if (ph) ph.classList.remove('shim');
+            const ph = p.querySelector('.ph'); if (ph) { ph.classList.remove('shim'); if (m.poster === 'ready') ph.innerHTML = ''; }
             if (m.poster === 'ready') { const ni = document.createElement('img'); ni.dataset.p = '1'; ni.alt = ''; ni.src = `/poster/${m.id}?v=${m.pv}`; ni.addEventListener('load', () => ni.classList.add('ld')); p.insertBefore(ni, p.firstChild); }
           });
         });
@@ -554,6 +655,7 @@
 
   LF.start = async function () {
     setupSearch();
+    if (LF.app) setupTv();
     $('#main').innerHTML = '<div class="page"><div class="grid" style="margin-top:40px">' + '<div class="skel"></div>'.repeat(12) + '</div></div>';
     window.addEventListener('hashchange', () => { LF.routed = true; route(); });
     const ok = await LF.load(false);

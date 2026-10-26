@@ -1,141 +1,111 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout
+<!-- The whole app is one WebView (added in code, inside webHolder) plus a native "connect" panel. -->
+<FrameLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg"
-    android:fitsSystemWindows="true">
+    android:background="@color/bg">
 
-    <!-- ── TOP BAR ── -->
+    <FrameLayout
+        android:id="@+id/webHolder"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+
+    <!-- Shown while connecting, when the server is missing, or from Menu / Settings > Change TV server -->
     <LinearLayout
-        android:id="@+id/topBar"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:paddingStart="32dp"
-        android:paddingEnd="32dp"
-        android:paddingTop="16dp"
-        android:paddingBottom="16dp"
-        android:background="@color/surface"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
+        android:id="@+id/connectPanel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/bg"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="48dp">
 
-        <!-- Logo -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="LocalFlix"
-            android:textSize="22sp"
-            android:textStyle="bold"
-            android:textColor="@color/amber"
-            android:fontFamily="sans-serif-medium"
-            android:layout_marginEnd="24dp" />
+            android:textColor="@color/accent"
+            android:textSize="40sp"
+            android:textStyle="bold" />
 
-        <!-- Search box -->
+        <TextView
+            android:id="@+id/connStatus"
+            android:layout_width="560dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:gravity="center"
+            android:lineSpacingExtra="4dp"
+            android:textColor="@color/text"
+            android:textSize="20sp" />
+
+        <ProgressBar
+            android:id="@+id/connProgress"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginTop="20dp"
+            android:indeterminate="true"
+            android:visibility="gone" />
+
         <EditText
-            android:id="@+id/searchEdit"
-            android:layout_width="0dp"
-            android:layout_height="42dp"
-            android:layout_weight="1"
-            android:background="@drawable/bg_search"
+            android:id="@+id/connInput"
+            android:layout_width="460dp"
+            android:layout_height="56dp"
+            android:layout_marginTop="24dp"
+            android:background="@drawable/bg_input"
+            android:hint="http://192.168.1.10:8080"
+            android:imeOptions="actionGo"
+            android:importantForAutofill="no"
+            android:inputType="textUri"
+            android:maxLines="1"
             android:paddingStart="16dp"
             android:paddingEnd="16dp"
-            android:hint="Search movies…"
-            android:textColorHint="@color/muted"
-            android:textColor="@color/text_primary"
-            android:textSize="15sp"
-            android:imeOptions="actionSearch"
-            android:inputType="text"
             android:singleLine="true"
-            android:focusable="true"
-            android:focusableInTouchMode="true"
-            android:nextFocusDown="@id/recyclerView" />
-
-        <!-- Count label -->
-        <TextView
-            android:id="@+id/countText"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textColor="@color/muted"
-            android:textSize="13sp"
-            android:layout_marginStart="20dp"
-            android:layout_marginEnd="16dp" />
-
-        <!-- Settings gear -->
-        <TextView
-            android:id="@+id/settingsBtn"
-            android:layout_width="42dp"
-            android:layout_height="42dp"
-            android:gravity="center"
-            android:text="⚙"
+            android:textColor="@color/text"
+            android:textColorHint="@color/muted"
             android:textSize="20sp"
-            android:textColor="@color/text_primary"
-            android:background="@drawable/bg_icon_btn"
-            android:focusable="true"
-            android:focusableInTouchMode="true"
-            android:alpha="0.6" />
+            android:visibility="gone" />
 
-    </LinearLayout>
-
-    <!-- ── PROGRESS ── -->
-    <ProgressBar
-        android:id="@+id/progressBar"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:visibility="gone"
-        app:layout_constraintTop_toBottomOf="@id/topBar"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
-
-    <!-- ── STATUS CARD (loading / error / empty) ── -->
-    <LinearLayout
-        android:id="@+id/statusCard"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:gravity="center"
-        android:padding="40dp"
-        android:visibility="gone"
-        app:layout_constraintTop_toBottomOf="@id/topBar"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
-
-        <TextView
-            android:id="@+id/statusIcon"
+        <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:textSize="52sp"
-            android:text="📂" />
+            android:layout_marginTop="24dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/connRetry"
+                android:layout_width="wrap_content"
+                android:layout_height="56dp"
+                android:background="@drawable/bg_btn"
+                android:minWidth="160dp"
+                android:stateListAnimator="@null"
+                android:text="Retry"
+                android:textAllCaps="false"
+                android:textColor="@color/btn_text"
+                android:textSize="20sp" />
+
+            <Button
+                android:id="@+id/connConnect"
+                android:layout_width="wrap_content"
+                android:layout_height="56dp"
+                android:layout_marginStart="16dp"
+                android:background="@drawable/bg_btn"
+                android:minWidth="160dp"
+                android:stateListAnimator="@null"
+                android:text="Connect"
+                android:textAllCaps="false"
+                android:textColor="@color/btn_text"
+                android:textSize="20sp"
+                android:visibility="gone" />
+        </LinearLayout>
 
         <TextView
-            android:id="@+id/statusMsg"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_marginTop="28dp"
+            android:text="Tip: press the Menu key on the remote at any time to change the server."
             android:textColor="@color/muted"
-            android:textSize="16sp"
-            android:textAlignment="center"
-            android:lineSpacingMultiplier="1.5"
-            android:layout_marginTop="16dp" />
-
+            android:textSize="15sp" />
     </LinearLayout>
-
-    <!-- ── MOVIE GRID ── -->
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/recyclerView"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:padding="20dp"
-        android:clipToPadding="false"
-        android:focusable="true"
-        android:descendantFocusability="afterDescendants"
-        app:layout_constraintTop_toBottomOf="@id/topBar"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
-
-</androidx.constraintlayout.widget.ConstraintLayout>
+</FrameLayout>

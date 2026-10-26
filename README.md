@@ -389,20 +389,22 @@ The selected card has a bright blue glow, so you always see where the cursor is.
 
 ## 11. Install the Android TV app (optional)
 
-The Android TV app gives a native TV interface with ExoPlayer. It is the best experience on a TV box or Android TV.
-The app can also find the laptop automatically on the same Wi-Fi (it sends a UDP broadcast on port 50505), so you may not need to type the address.
+The Android TV app shows the **same LocalFlix page** as the browser (same colours, tabs, posters and search) inside a WebView,
+and plays video with the **native ExoPlayer**, which opens more file types than a TV browser.
+There is **no mouse cursor** anywhere: everything is controlled with the remote (arrows, OK, Back, media keys).
 
 ### Requirements
 
 - Android Studio (free: https://developer.android.com/studio)
-- Android TV on the same Wi-Fi
+- Android TV on the same Wi-Fi as the laptop
+- LocalFlix running on the laptop (Section 6) and the firewall rule added (Section 7)
 
 ### Build the APK
 
 1. Open Android Studio
 2. **File -> Open** -> select the LocalFlix project folder
 3. Wait for the Gradle sync (the first time it downloads files and takes a few minutes)
-4. **Build -> Build Bundle(s) / APK(s) -> Build APK(s)**
+4. **Build -> Build Bundle(s) / APK(s) -> Build APK(s)**, or in a terminal: `gradlew assembleDebug`
 5. The APK is here: `app\build\outputs\apk\debug\app-debug.apk`
 
 ### Turn on Developer Mode on the TV
@@ -417,18 +419,57 @@ The app can also find the laptop automatically on the same Wi-Fi (it sends a UDP
 
 ```powershell
 adb connect 192.168.1.20:5555
-adb install "app\build\outputs\apk\debug\app-debug.apk"
+adb install -r "app\build\outputs\apk\debug\app-debug.apk"
 ```
 
-The **LocalFlix** icon appears on the TV home screen.
+The **LocalFlix** icon appears on the TV home screen. `-r` keeps the saved server address when you update the app.
 
 ### First start of the TV app
 
-1. Open LocalFlix on the TV
-2. If it does not find the laptop by itself, enter the Direct IP, for example `http://192.168.1.10:8080`
-3. Press Connect
+1. Open LocalFlix on the TV. It first checks the saved address, then **looks for the laptop by itself** (a UDP broadcast on port 50505, about 2 seconds).
+2. If it finds it, it opens the LocalFlix page straight away. Nothing to type.
+3. If not, a screen asks for the address. Type the **Direct IP** shown in the laptop window, for example `http://192.168.1.10:8080`, and press **Connect**. Just `192.168.1.10` also works.
+4. The address is saved once the server answered.
 
----
+### Change the server later
+
+- Press the **Menu** key on the remote (any time), **or**
+- open **Settings** (the sliders icon at the top right) and choose **Change TV server...**
+
+If the laptop is off or the address is wrong, a friendly screen with **Retry** appears instead of a browser error page.
+
+### Remote control (TV app)
+
+| Remote button | Browsing | While a video plays |
+|---|---|---|
+| Arrow keys | Move the blue focus ring | Left / Right: back / forward 10 s (hold for bigger steps). Up / Down: show the controls, then move between seek bar and buttons |
+| OK / Enter | Open the selected movie or button | Controls hidden: pause / play. Controls visible: press the selected button |
+| Back | Closes search suggestions, a window, or a screen. At the home screen it exits the app | Closes the Subtitles / Audio list, then hides the controls, then closes the player |
+| Menu | Change TV server | - |
+| Media keys | - | Play, Pause, Play/Pause, Rewind, Fast-forward, Next, Previous, Stop |
+
+In the player the **Subtitles** and **Audio** buttons open a list. Subtitles are off until you pick one; the app then remembers your choice.
+If the TV cannot play a file (for example AVI or HEVC without hardware support) and ffmpeg is installed on the laptop (Section 4),
+the app says "Converting for this TV..." and plays a converted stream instead. Seeking in a converted stream takes a moment because it restarts.
+Where you stopped is saved and offered again next time.
+
+### Manual test checklist
+
+1. Fresh install, laptop running: the app finds the laptop alone and shows the web UI (colours, tabs, posters, search identical to the browser).
+2. Fresh install, laptop NOT running: the connect screen shows with Retry and an address field (no browser error page). Start LocalFlix, press Retry: it connects.
+3. Type a wrong address and press Connect: a clear message appears and nothing is saved.
+4. No mouse cursor or pointer appears anywhere, in the web UI or the player.
+5. Arrows move the blue ring between tabs, search, buttons and movie cards in the expected direction. Nothing gets stuck (also in Browse, Search and Settings).
+6. OK on a movie opens the detail window, OK on Play starts the native player.
+7. Player: Left / Right seek, OK pauses, Up / Down show controls, the controls hide after about 4 seconds.
+8. Back order in the player: Subtitles list -> controls -> player. Back in the web UI: closes window -> previous screen -> at home it exits.
+9. Play an AVI / HEVC file: it falls back to "Converting for this TV..." (needs ffmpeg). Without ffmpeg a clear message appears.
+10. Subtitles: Off / pick a track / pick another. Audio: choose another track (on a converted stream it restarts).
+11. Stop a movie halfway, open it again: it resumes. After the last episode of a folder, "Up next" appears (OK plays it).
+12. Back in the web UI after the player closes: the focus ring is on the card you came from.
+13. Press Menu: the server screen opens; Back returns to the page.
+14. Open the same address on a phone / laptop browser: it works exactly as before.
+15. Update the APK with `adb install -r`: the saved address is still there.
 
 ## 12. Subtitles
 

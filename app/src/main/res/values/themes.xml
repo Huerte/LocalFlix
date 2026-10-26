@@ -1,24 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!--
-        Theme.AppCompat.Leanback is defined in the leanback artifact.
-        We also inherit AppCompat attrs (colorPrimary, colorAccent, colorPrimaryDark)
-        so they must be declared with the AppCompat namespace (no "android:" prefix).
-    -->
+    <!-- Theme.AppCompat.Leanback comes from the leanback artifact. -->
     <style name="Theme.LocalFlix" parent="@style/Theme.AppCompat.Leanback">
-        <!-- Window -->
         <item name="android:windowBackground">@color/bg</item>
         <item name="android:colorBackground">@color/bg</item>
         <item name="android:windowNoTitle">true</item>
-        <item name="android:windowFullscreen">false</item>
-
-        <!-- Text -->
-        <item name="android:textColorPrimary">@color/text_primary</item>
+        <item name="android:textColorPrimary">@color/text</item>
         <item name="android:textColorSecondary">@color/muted</item>
-
-        <!-- AppCompat color attrs — no android: prefix -->
+        <!-- AppCompat color attrs: no android: prefix -->
         <item name="colorPrimary">@color/surface</item>
         <item name="colorPrimaryDark">@color/bg</item>
-        <item name="colorAccent">@color/amber</item>
+        <item name="colorAccent">@color/accent</item>
+    </style>
+
+    <!-- Buttons of the native player: grey, turning blue with a white ring when focused (see bg_btn.xml) -->
+    <style name="PlayerBtn">
+        <item name="android:minWidth">96dp</item>
+        <item name="android:paddingStart">20dp</item>
+        <item name="android:paddingEnd">20dp</item>
+        <item name="android:background">@drawable/bg_btn</item>
+        <item name="android:textColor">@color/btn_text</item>
+        <item name="android:textSize">18sp</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:stateListAnimator">@null</item>
     </style>
 </resources>

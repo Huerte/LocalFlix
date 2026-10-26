@@ -1,6 +1,4 @@
-# Keep Retrofit and Gson model classes
--keep class com.sarge.localflix.data.** { *; }
--keepattributes Signature
--keepattributes *Annotation*
--dontwarn retrofit2.**
--keep class retrofit2.** { *; }
+# The WebView bridge is called from JavaScript by name, so R8 must not rename or remove it.
+-keepclassmembers class com.sarge.localflix.MainActivity$Bridge {
+    @android.webkit.JavascriptInterface <methods>;
+}

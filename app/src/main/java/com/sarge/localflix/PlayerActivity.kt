@@ -1,101 +1,701 @@
 package com.sarge.localflix
 
+import android.content.Context
+import android.content.Intent
+import android.content.res.ColorStateList
+import android.graphics.Color
+import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.util.TypedValue
+import android.view.Gravity
+import android.view.KeyEvent
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
+import android.widget.Button
+import android.widget.LinearLayout
+import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.lifecycleScope
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.PlayerView
+import androidx.media3.ui.CaptionStyleCompat
+import androidx.media3.ui.SubtitleView
 import com.sarge.localflix.databinding.ActivityPlayerBinding
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.Locale
 
+/**
+ * Native video player (ExoPlayer) for the LocalFlix TV app. Opened by MainActivity when the web page calls
+ * LocalFlixTV.play(). Returns the final position to MainActivity, which passes it back to the page so the web
+ * UI stores the resume point exactly like it does for its own player.
+ *
+ * Two playback modes:
+ *   DIRECT     GET /media/<id>      Range requests, so seeking is native. Subtitles are side-loaded WebVTT tracks.
+ *   TRANSCODE  GET /transcode/<id>?start=<s>&audio=<n>   ffmpeg converts to H.264/AAC on the fly. The stream cannot
+ *              seek, so every seek / audio change restarts it at a new start time. Because the stream starts at 0,
+ *              "movie time" = offsetMs + player position, and subtitles are drawn by us from the cue list.
+ * We start in DIRECT. If ExoPlayer cannot play the file and the server has ffmpeg, we retry once in TRANSCODE.
+ */
+@androidx.annotation.OptIn(UnstableApi::class)
 class PlayerActivity : FragmentActivity() {
 
-    private lateinit var binding: ActivityPlayerBinding
+    private lateinit var b: ActivityPlayerBinding
+    private lateinit var req: PlayRequest
     private var player: ExoPlayer? = null
-    private var playWhenReady = true
-    private var currentPosition: Long = 0L
+    private val ui = Handler(Looper.getMainLooper())
+
+    // ── playback state that must survive onStop/onStart ───────────────────────
+    private var transcoding = false
+    private var triedTranscode = false
+    private var offsetMs = 0L              // movie time at which the current transcode stream starts (0 when direct)
+    private var resumeMs = 0L              // movie time to start from
+    private var wantPlay = true
+    private var audioIdx = 0               // transcode: which audio track ffmpeg maps
+    private var lastPosMs = 0L             // last known movie time (also used after the player is released)
+    private var ended = false
+    private var pendingSeekMs = -1L        // target of a seek that has not been committed yet
+    private var resultNextId: String? = null
+    private var resultSet = false
+
+    // ── subtitles ─────────────────────────────────────────────────────────────
+    private var subChoice = -1             // index into req.subtitles, -1 = off
+    private var appliedSub = Int.MIN_VALUE // direct mode: what is currently applied to ExoPlayer
+    private var cues: List<Cue> = emptyList()
+    private var cuesFor = -2
+    private var cueJob: Job? = null
+
+    // ── UI state ──────────────────────────────────────────────────────────────
+    private var controlsOn = false
+    private var menuOn = false
+    private var dialogOn = false
+    private var menuOpener: View? = null
+    private var dialogCancel: (() -> Unit)? = null
+
+    private val prefs by lazy { getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
+
+    // ── lifecycle ─────────────────────────────────────────────────────────────
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        binding = ActivityPlayerBinding.inflate(layoutInflater)
-        setContentView(binding.root)
+        val raw = intent.getStringExtra(EXTRA_REQUEST)
+        req = try { PlayRequest.parse(raw ?: "") } catch (e: Exception) { finish(); return }
 
-        // Keep screen on while video plays
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-
-        // Full immersive — hide system bars
+        b = ActivityPlayerBinding.inflate(layoutInflater)
+        setContentView(b.root)
         hideSystemUi()
 
-        val movieName = intent.getStringExtra(EXTRA_NAME) ?: ""
-        binding.movieTitle.text = movieName
+        resumeMs = (req.startSeconds * 1000).toLong()
+        lastPosMs = resumeMs
+        // Subtitles start OFF unless the user turned them on before (then the same track, or the first one).
+        if (prefs.getBoolean(KEY_SUBS_ON, false) && req.subtitles.isNotEmpty()) {
+            val want = prefs.getString(KEY_SUB_LABEL, "")
+            subChoice = req.subtitles.indexOfFirst { it.label == want }.let { if (it >= 0) it else 0 }
+        }
+
+        b.titleText.text = req.title
+        b.bNext.visibility = if (req.nextId != null) View.VISIBLE else View.GONE
+        b.seekProgress.progressTintList = ColorStateList.valueOf(ContextCompat.getColor(this, R.color.accent))
+        b.seekProgress.progressBackgroundTintList = ColorStateList.valueOf(0x4DFFFFFF)
+        b.seekProgress.secondaryProgressTintList = ColorStateList.valueOf(0x66FFFFFF)
+        b.playerView.subtitleView?.apply {
+            setApplyEmbeddedStyles(false)
+            setStyle(CaptionStyleCompat(Color.WHITE, Color.TRANSPARENT, Color.TRANSPARENT, CaptionStyleCompat.EDGE_TYPE_OUTLINE, Color.BLACK, null))
+            setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * 1.15f)
+            setBottomPaddingFraction(0.08f)
+        }
+
+        b.bPlay.setOnClickListener { togglePlay() }
+        b.bBack10.setOnClickListener { seekBy(-10_000) }
+        b.bFwd10.setOnClickListener { seekBy(10_000) }
+        b.bSubs.setOnClickListener { openSubtitleMenu() }
+        b.bAudio.setOnClickListener { openAudioMenu() }
+        b.bNext.setOnClickListener { finishWithResult(req.nextId) }
     }
 
     override fun onStart() {
         super.onStart()
-        initPlayer()
+        if (!::req.isInitialized) return
+        // First start, or coming back after Home / another app: continue where we were.
+        if (player == null && !dialogOn) startPlayback(resumeMs, transcoding)
+        ui.post(tick)
     }
 
     override fun onStop() {
         super.onStop()
+        if (!::req.isInitialized) return
+        captureState()
         releasePlayer()
+        ui.removeCallbacksAndMessages(null)
     }
 
-    // ── player init ────────────────────────────────────────────────────────────
+    override fun onDestroy() {
+        ui.removeCallbacksAndMessages(null)
+        super.onDestroy()
+    }
 
-    private fun initPlayer() {
-        val url = intent.getStringExtra(EXTRA_URL) ?: run { finish(); return }
-
-        player = ExoPlayer.Builder(this).build().also { exo ->
-            binding.playerView.player = exo
-            binding.playerView.controllerAutoShow = true
-            binding.playerView.controllerShowTimeoutMs = 3000
-
-            val item = MediaItem.fromUri(url)
-            exo.setMediaItem(item)
-            exo.seekTo(currentPosition)
-            exo.playWhenReady = playWhenReady
-            exo.prepare()
-
-            exo.addListener(object : Player.Listener {
-                override fun onPlaybackStateChanged(state: Int) {
-                    // Hide title overlay once video is playing
-                    if (state == Player.STATE_READY || state == Player.STATE_BUFFERING) {
-                        binding.titleOverlay.postDelayed({
-                            binding.titleOverlay.animate().alpha(0f).setDuration(600).start()
-                        }, 2000)
-                    }
-                }
-            })
+    /** Result for MainActivity (-> LF.onNativePlayerClosed): id, seconds, finished, nextId. */
+    override fun finish() {
+        if (::req.isInitialized && !resultSet) {
+            resultSet = true
+            captureState()
+            setResult(RESULT_OK, Intent()
+                .putExtra(RESULT_ID, req.id)
+                .putExtra(RESULT_SECONDS, lastPosMs / 1000.0)
+                .putExtra(RESULT_FINISHED, ended)
+                .putExtra(RESULT_NEXT_ID, resultNextId))
         }
+        super.finish()
+    }
+
+    private fun finishWithResult(nextId: String?) {
+        resultNextId = nextId
+        finish()
+    }
+
+    private fun hideSystemUi() {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            hide(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+
+    // ── player ────────────────────────────────────────────────────────────────
+
+    /** (Re)creates the ExoPlayer at [positionMs] (movie time). [transcode] chooses the mode. */
+    private fun startPlayback(positionMs: Long, transcode: Boolean) {
+        releasePlayer()
+        transcoding = transcode
+        ended = false
+        pendingSeekMs = -1L
+        resumeMs = positionMs
+        b.spinner.visibility = View.VISIBLE
+
+        val exo = ExoPlayer.Builder(this)
+            .setAudioAttributes(
+                AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),
+                /* handleAudioFocus = */ true)
+            .setHandleAudioBecomingNoisy(true)
+            .build()
+        player = exo
+        b.playerView.player = exo
+
+        if (transcode) {
+            offsetMs = positionMs
+            val url = "${req.transcodeUrl}?start=${String.format(Locale.US, "%.2f", positionMs / 1000.0)}&audio=$audioIdx"
+            // Fragmented MP4 over HTTP: tell ExoPlayer the type, there is no file name to sniff.
+            exo.setMediaItem(MediaItem.Builder().setUri(url).setMimeType(MimeTypes.VIDEO_MP4).build())
+            loadCuesIfNeeded()
+        } else {
+            offsetMs = 0
+            val subs = req.subtitles.mapIndexed { i, s ->
+                MediaItem.SubtitleConfiguration.Builder(Uri.parse(s.url))
+                    .setMimeType(MimeTypes.TEXT_VTT)
+                    .setLabel(s.label)
+                    .setId("sub$i")
+                    .setSelectionFlags(0)
+                    .build()
+            }
+            exo.setMediaItem(MediaItem.Builder().setUri(req.streamUrl).setSubtitleConfigurations(subs).build(), positionMs)
+        }
+        // Subtitles off by default; applySubtitle() switches the chosen track on once ExoPlayer lists it.
+        exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
+        appliedSub = -1
+
+        exo.addListener(listener)
+        exo.playWhenReady = wantPlay
+        exo.prepare()
+        updateUi()
     }
 
     private fun releasePlayer() {
         player?.let {
-            playWhenReady   = it.playWhenReady
-            currentPosition = it.currentPosition
+            wantPlay = it.playWhenReady
+            it.removeListener(listener)
+            b.playerView.player = null
             it.release()
         }
         player = null
     }
 
-    // ── UI helpers ─────────────────────────────────────────────────────────────
-
-    private fun hideSystemUi() {
-        @Suppress("DEPRECATION")
-        window.decorView.systemUiVisibility = (
-            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-            or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-            or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-            or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-            or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-            or View.SYSTEM_UI_FLAG_FULLSCREEN
-        )
+    private fun captureState() {
+        val p = player
+        lastPosMs = logicalPos()
+        resumeMs = lastPosMs
+        if (p != null) wantPlay = p.playWhenReady
     }
 
+    private val listener = object : Player.Listener {
+        override fun onPlaybackStateChanged(state: Int) {
+            b.spinner.visibility = if (state == Player.STATE_BUFFERING) View.VISIBLE else View.GONE
+            if (state == Player.STATE_ENDED) onEnded()
+            updatePlayButton()
+        }
+
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            updatePlayButton()
+            if (!playWhenReady) { saveBrief(); if (!menuOn && !dialogOn) showControls(if (currentFocus == null) b.bPlay else null) }   // paused: keep controls up
+            else scheduleHide()
+        }
+
+        override fun onPlayerError(error: PlaybackException) = onPlayError(error)
+
+        override fun onTracksChanged(tracks: Tracks) = onTracks(tracks)
+    }
+
+    private fun saveBrief() { lastPosMs = logicalPos() }
+
+    private fun canTranscode() = req.ffmpeg && !transcoding && !triedTranscode
+
+    /** Direct mode could not play it (unsupported codec / container): convert on the server instead. */
+    private fun fallbackToTranscode() {
+        triedTranscode = true
+        showMsg("Converting for this TV...", 6000)
+        startPlayback(logicalPos(), true)
+    }
+
+    private fun onPlayError(error: PlaybackException) {
+        if (canTranscode()) { fallbackToTranscode(); return }
+        val why = when {
+            transcoding -> "Even the converted video could not be opened. The file may be damaged or use an unusual format."
+            !req.ffmpeg -> "This TV cannot play this file. Install ffmpeg on the laptop running LocalFlix (see the README) so it can be converted automatically."
+            else -> "This TV cannot play this file."
+        }
+        val pos = logicalPos()
+        showDialog("This video cannot be played", why + "\n\n(" + (error.errorCodeName) + ")",
+            "Try again", { startPlayback(pos, transcoding) }, "Close", { finishWithResult(null) }) { finishWithResult(null) }
+    }
+
+    /** Looks for tracks the TV cannot decode (e.g. only an unsupported audio track) and applies the subtitle choice. */
+    private fun onTracks(tracks: Tracks) {
+        if (transcoding) return
+        fun unsupported(type: Int): Boolean {
+            val groups = tracks.groups.filter { it.type == type }
+            return groups.isNotEmpty() && groups.none { g -> (0 until g.length).any { i -> g.isTrackSupported(i) } }
+        }
+        if ((unsupported(C.TRACK_TYPE_VIDEO) || unsupported(C.TRACK_TYPE_AUDIO)) && canTranscode()) {
+            fallbackToTranscode()
+            return
+        }
+        if (appliedSub != subChoice) applySubtitle()
+    }
+
+    private fun onEnded() {
+        val dur = durationMs()
+        // A converted stream that stops long before the end means ffmpeg died: that is an error, not "finished".
+        if (transcoding && dur > 0 && logicalPos() < dur - 20_000) {
+            val pos = logicalPos()
+            showDialog("Playback stopped early", "The conversion stopped before the end of the movie.",
+                "Continue from here", { startPlayback(pos, true) }, "Close", { finishWithResult(null) }) { finishWithResult(null) }
+            return
+        }
+        ended = true
+        if (req.nextId != null) {
+            showDialog("Up next", req.nextTitle ?: "Next episode",
+                "Play now", { finishWithResult(req.nextId) }, "Cancel", { finishWithResult(null) }) { finishWithResult(null) }
+        } else {
+            finishWithResult(null)
+        }
+    }
+
+    // ── time helpers ──────────────────────────────────────────────────────────
+
+    /** Current position in the MOVIE (not in the stream). */
+    private fun logicalPos(): Long {
+        if (pendingSeekMs >= 0) return pendingSeekMs
+        val p = player ?: return lastPosMs
+        return offsetMs + p.currentPosition
+    }
+
+    private fun durationMs(): Long {
+        if (req.durationSeconds > 0) return (req.durationSeconds * 1000).toLong()
+        val d = player?.duration ?: C.TIME_UNSET
+        return if (d != C.TIME_UNSET && d > 0) offsetMs + d else 0L
+    }
+
+    private fun fmt(ms: Long): String {
+        val s = (ms / 1000).coerceAtLeast(0)
+        val h = s / 3600; val m = (s % 3600) / 60; val sec = s % 60
+        return if (h > 0) String.format(Locale.US, "%d:%02d:%02d", h, m, sec) else String.format(Locale.US, "%d:%02d", m, sec)
+    }
+
+    // ── seeking ───────────────────────────────────────────────────────────────
+
+    /**
+     * Seeks are collected for 0.5 s and then applied once. That makes holding Left/Right smooth, and in transcode
+     * mode it avoids restarting ffmpeg for every key repeat.
+     */
+    private fun seekBy(deltaMs: Long) {
+        val dur = durationMs()
+        var t = logicalPos() + deltaMs
+        if (t < 0) t = 0
+        if (dur > 0 && t > dur - 1000) t = (dur - 1000).coerceAtLeast(0)
+        pendingSeekMs = t
+        showControls(null)
+        updateUi()
+        ui.removeCallbacks(commitSeek)
+        ui.postDelayed(commitSeek, 500)
+    }
+
+    /** Left/Right on the remote. Holding the key gives bigger steps (10 s, then 30 s, then 60 s). */
+    private fun seekStep(direction: Int, repeat: Int) {
+        if (repeat > 0 && repeat % 4 != 0) return          // key repeat is very fast; act on every 4th
+        val sec = when { repeat >= 24 -> 60; repeat >= 12 -> 30; else -> 10 }
+        seekBy(direction * sec * 1000L)
+    }
+
+    private val commitSeek = Runnable {
+        val t = pendingSeekMs
+        pendingSeekMs = -1L
+        val exo = player ?: return@Runnable
+        if (t < 0) return@Runnable
+        ended = false
+        if (transcoding) startPlayback(t, true) else exo.seekTo(t)
+    }
+
+    private fun togglePlay() {
+        val exo = player ?: return
+        if (exo.playbackState == Player.STATE_ENDED) { exo.seekTo(0); exo.play(); return }
+        if (exo.playWhenReady) exo.pause() else exo.play()
+    }
+
+    // ── subtitles ─────────────────────────────────────────────────────────────
+
+    private fun selectSubtitle(index: Int) {
+        subChoice = index
+        val ed = prefs.edit().putBoolean(KEY_SUBS_ON, index >= 0)
+        if (index >= 0) ed.putString(KEY_SUB_LABEL, req.subtitles[index].label)
+        ed.apply()
+        if (transcoding) loadCuesIfNeeded() else applySubtitle()
+        b.subText.visibility = View.GONE
+    }
+
+    /** Direct mode: turn the chosen side-loaded track on/off in ExoPlayer. */
+    private fun applySubtitle() {
+        val exo = player ?: return
+        val params = exo.trackSelectionParameters.buildUpon()
+        if (subChoice < 0) {
+            params.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+        } else {
+            // Not listed yet? onTracksChanged calls us again.
+            val g = exo.currentTracks.groups.firstOrNull { grp ->
+                grp.type == C.TRACK_TYPE_TEXT && grp.length > 0 && (
+                    grp.getTrackFormat(0).id == "sub$subChoice" ||
+                    grp.getTrackFormat(0).label == req.subtitles[subChoice].label)
+            } ?: return
+            params.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                .setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, 0))
+        }
+        exo.trackSelectionParameters = params.build()
+        appliedSub = subChoice
+    }
+
+    /** Transcode mode: download the cue list of the chosen track (the .vtt url without ".vtt" is the JSON one). */
+    private fun loadCuesIfNeeded() {
+        if (subChoice < 0) { cueJob?.cancel(); cues = emptyList(); cuesFor = -1; return }
+        if (cuesFor == subChoice) return
+        cueJob?.cancel()
+        cues = emptyList()
+        cuesFor = subChoice
+        val url = req.subtitles[subChoice].url.removeSuffix(".vtt")
+        cueJob = lifecycleScope.launch {
+            try {
+                // Embedded subtitles are extracted by ffmpeg on the server, which can take a while.
+                cues = withContext(Dispatchers.IO) { parseCues(Http.getText(url, 4000, 130_000)) }
+            } catch (e: Exception) {
+                cuesFor = -2
+                showMsg("Could not load that subtitle.")
+            }
+        }
+    }
+
+    /** Transcode mode only: draw the line(s) active at the current movie time. */
+    private fun drawCue() {
+        if (!transcoding || subChoice < 0 || cues.isEmpty()) {
+            if (b.subText.visibility != View.GONE) b.subText.visibility = View.GONE
+            return
+        }
+        val t = logicalPos() / 1000.0
+        // cues are sorted by start; look at the last few that started before now
+        var lo = 0; var hi = cues.size - 1; var idx = -1
+        while (lo <= hi) { val mid = (lo + hi) ushr 1; if (cues[mid].start <= t) { idx = mid; lo = mid + 1 } else hi = mid - 1 }
+        val sb = StringBuilder()
+        var i = idx
+        while (i >= 0 && i > idx - 3) {
+            if (cues[i].end > t) sb.insert(0, if (sb.isEmpty()) cues[i].text else cues[i].text + "\n")
+            i--
+        }
+        val txt = sb.toString()
+        if (txt.isEmpty()) { b.subText.visibility = View.GONE; return }
+        if (b.subText.text.toString() != txt) b.subText.text = txt
+        b.subText.visibility = View.VISIBLE
+    }
+
+    // ── menus (subtitles / audio) ─────────────────────────────────────────────
+
+    private class MenuEntry(val label: String, val checked: Boolean, val onPick: () -> Unit)
+
+    private fun openSubtitleMenu() {
+        val items = ArrayList<MenuEntry>()
+        items.add(MenuEntry("Off", subChoice < 0) { selectSubtitle(-1) })
+        req.subtitles.forEachIndexed { i, s -> items.add(MenuEntry(s.label, subChoice == i) { selectSubtitle(i) }) }
+        openMenu("Subtitles", items, b.bSubs)
+    }
+
+    private fun openAudioMenu() {
+        val items = ArrayList<MenuEntry>()
+        val exo = player
+        if (transcoding) {
+            // The converted stream carries one audio track; choosing another restarts the conversion with that track.
+            req.audio.forEach { a ->
+                val detail = listOf(a.codec.uppercase(), channelsText(a.channels)).filter { it.isNotEmpty() }.joinToString("  ·  ")
+                items.add(MenuEntry(a.label + if (detail.isNotEmpty()) "   ($detail)" else "", a.n == audioIdx) {
+                    if (a.n != audioIdx) { audioIdx = a.n; startPlayback(logicalPos(), true); showMsg("Audio track changed.") }
+                })
+            }
+        } else if (exo != null) {
+            // Direct mode: the audio tracks ExoPlayer found in the file.
+            exo.currentTracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }.forEachIndexed { n, g ->
+                val f = g.getTrackFormat(0)
+                val name = f.label ?: f.language?.let { Locale(it).displayLanguage } ?: "Track ${n + 1}"
+                val detail = listOf((f.sampleMimeType ?: "").substringAfter('/').uppercase(), channelsText(f.channelCount)).filter { it.isNotEmpty() }.joinToString("  ·  ")
+                items.add(MenuEntry(name + if (detail.isNotEmpty()) "   ($detail)" else "", g.isSelected) {
+                    exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
+                        .setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, 0)).build()
+                })
+            }
+        }
+        openMenu("Audio", items, b.bAudio)
+    }
+
+    private fun channelsText(ch: Int) = when { ch <= 0 -> ""; ch == 1 -> "Mono"; ch == 2 -> "Stereo"; ch == 6 -> "5.1"; ch == 8 -> "7.1"; else -> "$ch ch" }
+
+    private fun openMenu(title: String, items: List<MenuEntry>, opener: View) {
+        menuOpener = opener
+        b.menuTitle.text = title
+        b.menuList.removeAllViews()
+        var focusTarget: View? = null
+        if (items.isEmpty()) {
+            b.menuList.addView(android.widget.TextView(this).apply {
+                text = "Nothing to choose from."; setTextColor(ContextCompat.getColor(this@PlayerActivity, R.color.muted)); textSize = 18f
+            })
+        }
+        for (e in items) {
+            val btn = Button(this).apply {
+                text = (if (e.checked) "●  " else "     ") + e.label
+                isAllCaps = false
+                gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+                setTextColor(ContextCompat.getColorStateList(this@PlayerActivity, R.color.btn_text))
+                setBackgroundResource(R.drawable.bg_btn)
+                stateListAnimator = null
+                minimumHeight = dp(48)
+                setOnClickListener { closeMenu(); e.onPick() }
+            }
+            b.menuList.addView(btn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(6) })
+            if (e.checked || focusTarget == null) focusTarget = btn   // focus the current choice, else the first row
+        }
+        menuOn = true
+        ui.removeCallbacks(hideRunnable)
+        b.menuPanel.visibility = View.VISIBLE
+        focusTarget?.requestFocus()
+    }
+
+    private fun closeMenu() {
+        menuOn = false
+        b.menuPanel.visibility = View.GONE
+        menuOpener?.requestFocus()
+        scheduleHide()
+    }
+
+    // ── dialog (next episode / errors) ────────────────────────────────────────
+
+    private fun showDialog(title: String, text: String, aLabel: String, aAction: () -> Unit,
+                           bLabel: String?, bAction: (() -> Unit)?, onCancel: () -> Unit) {
+        hideControls()
+        menuOn = false; b.menuPanel.visibility = View.GONE
+        dialogOn = true
+        dialogCancel = onCancel
+        b.dialogTitle.text = title
+        b.dialogText.text = text
+        b.dialogBtnA.text = aLabel
+        b.dialogBtnA.setOnClickListener { hideDialog(); aAction() }
+        if (bLabel != null && bAction != null) {
+            b.dialogBtnB.visibility = View.VISIBLE
+            b.dialogBtnB.text = bLabel
+            b.dialogBtnB.setOnClickListener { hideDialog(); bAction() }
+        } else b.dialogBtnB.visibility = View.GONE
+        b.dialogPanel.visibility = View.VISIBLE
+        b.dialogBtnA.requestFocus()
+    }
+
+    private fun hideDialog() {
+        dialogOn = false
+        dialogCancel = null
+        b.dialogPanel.visibility = View.GONE
+    }
+
+    // ── controls ──────────────────────────────────────────────────────────────
+
+    private val hideRunnable = Runnable { if (player?.playWhenReady == true && !menuOn && !dialogOn && pendingSeekMs < 0) hideControls() }
+
+    /** Shows the controls and (optionally) puts the focus ring on [focus]. */
+    private fun showControls(focus: View?) {
+        controlsOn = true
+        b.controls.visibility = View.VISIBLE
+        if (focus != null) focus.requestFocus()
+        scheduleHide()
+        updateUi()
+    }
+
+    private fun hideControls() {
+        controlsOn = false
+        ui.removeCallbacks(hideRunnable)
+        b.controls.visibility = View.GONE        // a hidden view loses focus automatically
+    }
+
+    private fun scheduleHide() {
+        ui.removeCallbacks(hideRunnable)
+        ui.postDelayed(hideRunnable, 4000)
+    }
+
+    private fun showMsg(text: String, ms: Long = 3500) {
+        b.msgText.text = text
+        b.msgText.visibility = View.VISIBLE
+        ui.removeCallbacks(hideMsg)
+        ui.postDelayed(hideMsg, ms)
+    }
+    private val hideMsg = Runnable { b.msgText.visibility = View.GONE }
+
+    private fun updatePlayButton() {
+        val playing = player?.playWhenReady == true && player?.playbackState != Player.STATE_ENDED
+        b.bPlay.text = if (playing) "Pause" else "Play"
+    }
+
+    /** Runs 4x a second: seek bar, time text, converted-stream subtitles. */
+    private val tick = object : Runnable {
+        override fun run() {
+            updateUi()
+            ui.postDelayed(this, 250)
+        }
+    }
+
+    private fun updateUi() {
+        val pos = logicalPos()
+        if (pendingSeekMs < 0) lastPosMs = pos
+        if (controlsOn) {
+            val dur = durationMs()
+            b.seekProgress.progress = if (dur > 0) (pos * 1000 / dur).toInt().coerceIn(0, 1000) else 0
+            val buf = player?.bufferedPosition ?: 0L
+            b.seekProgress.secondaryProgress = if (dur > 0) ((offsetMs + buf) * 1000 / dur).toInt().coerceIn(0, 1000) else 0
+            b.timeText.text = if (dur > 0) "${fmt(pos)} / ${fmt(dur)}" else fmt(pos)
+        }
+        drawCue()
+    }
+
+    // ── remote keys ───────────────────────────────────────────────────────────
+    //   Back          close menu -> hide controls -> close player
+    //   Left / Right  seek -10 s / +10 s (hold = bigger steps); with controls up and focus on a button they move focus
+    //   Up / Down     show the controls, then move focus between seek bar and buttons
+    //   OK            hidden: play/pause.  visible: press the focused button
+    //   Media keys    play, pause, play/pause, rewind, fast-forward, next, previous, stop
+
+    override fun dispatchKeyEvent(e: KeyEvent): Boolean {
+        val k = e.keyCode
+        val down = e.action == KeyEvent.ACTION_DOWN
+
+        if (k == KeyEvent.KEYCODE_BACK || k == KeyEvent.KEYCODE_ESCAPE) {
+            if (e.action == KeyEvent.ACTION_UP) onBackKey()
+            return true
+        }
+
+        // Media keys work in every state.
+        when (k) {
+            KeyEvent.KEYCODE_MEDIA_PLAY -> { if (down) { player?.play() }; return true }
+            KeyEvent.KEYCODE_MEDIA_PAUSE -> { if (down) { player?.pause() }; return true }
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_HEADSETHOOK -> { if (down && e.repeatCount == 0) togglePlay(); return true }
+            KeyEvent.KEYCODE_MEDIA_REWIND -> { if (down) seekStep(-1, e.repeatCount); return true }
+            KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> { if (down) seekStep(1, e.repeatCount); return true }
+            KeyEvent.KEYCODE_MEDIA_NEXT -> { if (down && e.repeatCount == 0 && req.nextId != null) finishWithResult(req.nextId); return true }
+            KeyEvent.KEYCODE_MEDIA_PREVIOUS -> { if (down && e.repeatCount == 0) seekBy(-logicalPos()); return true }
+            KeyEvent.KEYCODE_MEDIA_STOP -> { if (down) finishWithResult(null); return true }
+        }
+
+        // Menu or dialog open: normal focus navigation between their buttons.
+        if (dialogOn || menuOn) return super.dispatchKeyEvent(e)
+
+        val isOk = k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER || k == KeyEvent.KEYCODE_NUMPAD_ENTER || k == KeyEvent.KEYCODE_BUTTON_A
+        val isDir = k == KeyEvent.KEYCODE_DPAD_LEFT || k == KeyEvent.KEYCODE_DPAD_RIGHT || k == KeyEvent.KEYCODE_DPAD_UP || k == KeyEvent.KEYCODE_DPAD_DOWN
+
+        if (!controlsOn) {
+            // Controls hidden: the remote is a plain player remote.
+            when {
+                k == KeyEvent.KEYCODE_DPAD_LEFT || k == KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                    if (down) { showControls(b.seekBar); seekStep(if (k == KeyEvent.KEYCODE_DPAD_LEFT) -1 else 1, e.repeatCount) }
+                    return true
+                }
+                k == KeyEvent.KEYCODE_DPAD_UP || k == KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    if (down && e.repeatCount == 0) showControls(b.bPlay)
+                    return true
+                }
+                isOk -> { if (down && e.repeatCount == 0) togglePlay(); return true }
+            }
+            return super.dispatchKeyEvent(e)
+        }
+
+        // Controls visible
+        if (down && (isDir || isOk)) scheduleHide()
+        if (b.seekBar.hasFocus()) {
+            if (k == KeyEvent.KEYCODE_DPAD_LEFT || k == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                if (down) seekStep(if (k == KeyEvent.KEYCODE_DPAD_LEFT) -1 else 1, e.repeatCount)
+                return true
+            }
+            if (k == KeyEvent.KEYCODE_DPAD_UP) return true          // nothing above: do not let focus escape
+            if (isOk) { if (down && e.repeatCount == 0) togglePlay(); return true }
+        } else if (k == KeyEvent.KEYCODE_DPAD_DOWN && currentFocus?.parent === b.bPlay.parent) {
+            return true                                              // button row is the bottom: nothing below
+        }
+        return super.dispatchKeyEvent(e)
+    }
+
+    private fun onBackKey() {
+        when {
+            dialogOn -> dialogCancel?.invoke()
+            menuOn -> closeMenu()
+            controlsOn -> hideControls()
+            else -> finishWithResult(null)
+        }
+    }
+
+    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
     companion object {
-        const val EXTRA_URL  = "STREAM_URL"
-        const val EXTRA_NAME = "MOVIE_NAME"
+        const val EXTRA_REQUEST = "request"
+        const val RESULT_ID = "id"
+        const val RESULT_SECONDS = "seconds"
+        const val RESULT_FINISHED = "finished"
+        const val RESULT_NEXT_ID = "nextId"
+        private const val PREFS = "localflix_player"
+        private const val KEY_SUBS_ON = "subs_on"
+        private const val KEY_SUB_LABEL = "sub_label"
     }
 }

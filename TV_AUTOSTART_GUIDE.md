@@ -1,15 +1,15 @@
 # LocalFlix TV auto-start (Windows 11)
 
-LocalFlix starts by itself, hidden in the background, **only when both are true**:
+LocalFlix starts by itself, hidden in the background, **only when both are true**, and the monitor task is `Running` **only while both are true**:
 
 1. your laptop is on your **home** network, and
 2. your **Android TV / Google TV** is on that same Wi-Fi.
 
-While the TV is using the server it also stops Windows from falling asleep on its own (section 7). Away from home nothing starts, ever.
+While the TV is using the server it also stops Windows from falling asleep on its own (section 6). Away from home nothing starts, ever.
 
 Run every command below in PowerShell, opened in your LocalFlix folder.
 
-> "TV is connected" means the TV is reachable on the Wi-Fi. Some TVs stay on the Wi-Fi in standby, so the server may start even if the screen is off. That is harmless (see section 7).
+> "TV is connected" means the TV is reachable on the Wi-Fi. Some TVs stay on the Wi-Fi in standby, so the server may start even if the screen is off. That is harmless (see section 6).
 
 ---
 
@@ -51,9 +51,11 @@ This creates the task **LocalFlix TV Monitor**:
 |---|---|
 | Runs as | you, only while signed in, no admin rights |
 | Window | hidden (`pythonw.exe`) |
-| Triggers | at sign-in, **and** every time Windows connects to a network (Event 10000), 20 s delay |
+| Triggers | at sign-in, then **every minute** (change with `-CheckEveryMinutes`), **and** every time Windows connects to a network (Event 10000, 20 s delay) |
 | Battery | keeps running on battery |
 | Duplicates | a second copy is ignored |
+| Home or TV missing | the monitor ends within a second or two, so the task shows `Ready`, not `Running` |
+| Home and TV both there | the monitor stays `Running`: starts the server, keeps the laptop awake (if plugged in), and ends about a minute after the TV or home is gone |
 | Time limit | none |
 
 Remove it any time:
@@ -96,6 +98,8 @@ Away-from-home test: connect the laptop to a phone hotspot and run `py tv_monito
 | `home_gateway_macs` | router MAC(s); both lists must match when both are filled |
 | `tv_ip`, `tv_mac` | the TV (either is enough, both is safest) |
 | `poll_seconds` | how often to look for the TV (default 15) |
+| `run_only_with_tv` | `true` (default) = the monitor is alive only while you are home AND the TV is on the Wi-Fi (Task Scheduler re-checks every minute). `false` = the older mode where it stays alive and waits |
+| `exit_when_away` | `true` (default) = the monitor ends itself when you are not on the home network, so nothing runs away from home. Windows starts it again when you connect to a network. `false` = it stays alive and just idles |
 | `stop_when_leaving_home` | `true` = also stop the server when you leave home. Default `false` (start only) |
 | `keep_awake` | `true` (default) = Windows will not sleep on its own while the server runs, you are home and the TV is on the Wi-Fi. `false` = never touch sleep settings |
 | `keep_awake_on_battery` | `false` (default) = keep awake only while the charger is plugged in. `true` = also on battery (drains it faster) |
@@ -107,10 +111,9 @@ Changed router or Wi-Fi name? Run `py tv_monitor.py --setup` again, then restart
 ## 6. Will this slow the laptop, heat it, or drain the battery?
 
 **The monitor itself: no, not noticeably.**
-- Away from home: one tiny Wi-Fi-name check every 30 s.
-- At home waiting for the TV: one 1-packet ping every 15 s.
-- Server already running: one local port check per minute.
-- That is far below 1% CPU, roughly 10-20 MB of memory, and no fan or heat change. Battery cost is too small to measure in normal use.
+- Not home, or home without the TV: once a minute Windows starts it, it does a quick check (a Wi-Fi-name lookup and one ping) and ends within a second or two. Nothing stays running in between.
+- Home and TV on: it stays alive with one ping every 30 s, and ends about a minute after the TV is gone.
+- Even with a launch every minute that is far below 1% CPU, roughly 10-20 MB of memory only while it is alive, and no fan or heat change. Battery cost is too small to measure in normal use.
 
 **The LocalFlix server is what uses power, and only while it runs.**
 - Idle server: nearly nothing.
@@ -138,7 +141,9 @@ Prefer to manage sleep yourself? Set `"keep_awake": false` in `tv_monitor.json`,
 | TV `not found` but the TV is on | Is it on the same Wi-Fi (not a guest network)? Some routers block device-to-device traffic ("AP / client isolation"): turn that off |
 | Server starts but the TV cannot connect | The firewall step in the main README (`py localflix.py --firewall`) |
 | Nothing happens, log says "No home network is set" | Run `py tv_monitor.py --setup` |
-| Task shows "Running" forever | That is normal: the monitor stays alive, doing its tiny checks |
+| Task shows "Running" but the TV is off | It ends about a minute after the TV leaves the network. If it stays `Running`, run `py tv_monitor.py --check`: `TV ... FOUND` means the TV still answers on the network (many TVs do in standby). Also check `"run_only_with_tv"` is not `false` in `tv_monitor.json` |
+| Task is `Ready` while home and TV are on | It checks once a minute, so wait up to a minute. You can also right-click the task > Run. If it never starts, run `py tv_monitor.py --check` and read `tv_monitor.log` |
+| Re-install after updating | After changing the schedule or updating `install_tv_monitor_task.ps1`, run the installer again (it replaces the old task) |
 | Stop the server now | Task Manager > end `pythonw.exe` running `localflix.py` |
 
 ## 8. Uninstall

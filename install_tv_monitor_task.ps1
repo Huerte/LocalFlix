@@ -6,6 +6,7 @@
 # No administrator rights needed: the task runs as YOU, only while you are signed in, hidden, and keeps running on battery.
 param(
     [switch]$Remove,
+    [ValidateRange(1, 60)][int]$CheckEveryMinutes = 1,   # how often Windows looks for "home + TV" (the script ends at once if not)
     [string]$TaskName = "LocalFlix TV Monitor"
 )
 $ErrorActionPreference = 'Stop'
@@ -35,6 +36,11 @@ $action = New-ScheduledTaskAction -Execute $pyw -Argument "`"$script`" --run" -W
 
 # Trigger 1: when you sign in.
 $logon = New-ScheduledTaskTrigger -AtLogOn -User $me
+# ...and then again every few minutes. The script checks "home + TV", and if either is missing it ends within a second or two,
+# so the task shows "Ready" (not "Running") unless you are home AND the TV is on the Wi-Fi.
+$rep = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes $CheckEveryMinutes) `
+    -RepetitionDuration (New-TimeSpan -Days 3650)
+$logon.Repetition = $rep.Repetition
 
 # Trigger 2: every time Windows connects to a network (Event ID 10000, log Microsoft-Windows-NetworkProfile/Operational).
 # If the monitor is already running this does nothing (see MultipleInstances below).
@@ -58,5 +64,6 @@ Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger @($logon, $n
 Start-ScheduledTask -TaskName $TaskName
 
 Write-Host "Task '$TaskName' installed and started." -ForegroundColor Green
+Write-Host "  Checks every $CheckEveryMinutes minute(s); the task shows Running only while you are home AND the TV is on the Wi-Fi."
 Write-Host "  Runs: $pyw `"$script`" --run"
 Write-Host "  Log : $(Join-Path $here 'tv_monitor.log')"

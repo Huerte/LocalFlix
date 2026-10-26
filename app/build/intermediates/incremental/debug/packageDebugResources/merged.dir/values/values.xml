@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="amber">#F59E0B</color>
+    <color name="amber_dim">#22F59E0B</color>
+    <color name="bg">#070711</color>
+    <color name="black">#000000</color>
+    <color name="border">#1E1E36</color>
+    <color name="border_focused">#F59E0B</color>
+    <color name="card">#131328</color>
+    <color name="card_focused">#1e1e40</color>
+    <color name="indigo">#818CF8</color>
+    <color name="muted">#5A617E</color>
+    <color name="surface">#0d0d1e</color>
+    <color name="text_primary">#DDE2F4</color>
+    <color name="white">#FFFFFF</color>
+    <string name="app_name">LocalFlix</string>
+    <string name="loading">Connecting…</string>
+    <string name="no_server">Cannot reach server</string>
+    <string name="search_hint">Search movies…</string>
+    <style name="Theme.LocalFlix" parent="@style/Theme.AppCompat.Leanback">
+        
+        <item name="android:windowBackground">@color/bg</item>
+        <item name="android:colorBackground">@color/bg</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowFullscreen">false</item>
+
+        
+        <item name="android:textColorPrimary">@color/text_primary</item>
+        <item name="android:textColorSecondary">@color/muted</item>
+
+        
+        <item name="colorPrimary">@color/surface</item>
+        <item name="colorPrimaryDark">@color/bg</item>
+        <item name="colorAccent">@color/amber</item>
+    </style>
+</resources>

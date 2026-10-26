@@ -1,0 +1,7 @@
+{
+  "movies_dir": "C:\\Users\\hp\\Videos\\Movies",
+  "subtitle_dir": "C:\\Users\\hp\\Videos\\Movies\\subtitle",
+  "port": 8080,
+  "online_lookup": true,
+  "tmdb_key": ""
+}

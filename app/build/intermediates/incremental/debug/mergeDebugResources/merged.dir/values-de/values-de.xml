@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:ns1="urn:oasis:names:tc:xliff:document:1.2">
+    <string-array name="exo_controls_playback_speeds">
+    <item>0,25-fach</item>
+    <item>0,5-fach</item>
+    <item>0,75-fach</item>
+    <item>Standard</item>
+    <item>1,25-fach</item>
+    <item>1,5-fach</item>
+    <item>2-fach</item>
+  </string-array>
+    <plurals name="exo_controls_fastforward_by_amount_description">
+    <item quantity="one">%d Sekunde vorspulen</item>
+    <item quantity="other">%d Sekunden vorspulen</item>
+  </plurals>
+    <plurals name="exo_controls_rewind_by_amount_description">
+    <item quantity="one">%d Sekunde zurückspulen</item>
+    <item quantity="other">%d Sekunden zurückspulen</item>
+  </plurals>
+    <string msgid="5976598919945601918" name="abc_action_bar_home_description">"Zur Startseite"</string>
+    <string msgid="8388173803310557296" name="abc_action_bar_up_description">"Nach oben"</string>
+    <string msgid="3937310113216875497" name="abc_action_menu_overflow_description">"Weitere Optionen"</string>
+    <string msgid="4692188335987374352" name="abc_action_mode_done">"Fertig"</string>
+    <string msgid="1189761859438369441" name="abc_activity_chooser_view_see_all">"Alle anzeigen"</string>
+    <string msgid="2165779757652331008" name="abc_activitychooserview_choose_application">"App auswählen"</string>
+    <string msgid="4215997306490295099" name="abc_capital_off">"AUS"</string>
+    <string msgid="884982626291842264" name="abc_capital_on">"AN"</string>
+    <string msgid="8833365367933412986" name="abc_menu_alt_shortcut_label">"Alt +"</string>
+    <string msgid="2223301931652355242" name="abc_menu_ctrl_shortcut_label">"Strg +"</string>
+    <string msgid="838001238306846836" name="abc_menu_delete_shortcut_label">"Löschen"</string>
+    <string msgid="7986526966204849475" name="abc_menu_enter_shortcut_label">"Eingabetaste"</string>
+    <string msgid="375214403600139847" name="abc_menu_function_shortcut_label">"Funktionstaste +"</string>
+    <string msgid="4192209724446364286" name="abc_menu_meta_shortcut_label">"Meta-Taste +"</string>
+    <string msgid="4741552369836443843" name="abc_menu_shift_shortcut_label">"Umschalttaste +"</string>
+    <string msgid="5473865519181928982" name="abc_menu_space_shortcut_label">"Leertaste"</string>
+    <string msgid="6180552449598693998" name="abc_menu_sym_shortcut_label">"Sym-Taste +"</string>
+    <string msgid="5520303668377388990" name="abc_prepend_shortcut_label">"Menütaste +"</string>
+    <string msgid="7208076849092622260" name="abc_search_hint">"Suchen…"</string>
+    <string msgid="3741173234950517107" name="abc_searchview_description_clear">"Suchanfrage löschen"</string>
+    <string msgid="693312494995508443" name="abc_searchview_description_query">"Suchanfrage"</string>
+    <string msgid="3417662926640357176" name="abc_searchview_description_search">"Suche"</string>
+    <string msgid="1486535517437947103" name="abc_searchview_description_submit">"Anfrage senden"</string>
+    <string msgid="2293578557972875415" name="abc_searchview_description_voice">"Sprachsuche"</string>
+    <string msgid="8875138169939072951" name="abc_shareactionprovider_share_with">"Teilen mit"</string>
+    <string msgid="9055268688411532828" name="abc_shareactionprovider_share_with_application">"Mit <ns1:g id="APPLICATION_NAME">%s</ns1:g> teilen"</string>
+    <string msgid="1656852541809559762" name="abc_toolbar_collapse_description">"Minimieren"</string>
+    <string msgid="881409763997275156" name="call_notification_answer_action">"Annehmen"</string>
+    <string msgid="8793775615905189152" name="call_notification_answer_video_action">"Video"</string>
+    <string msgid="3229508546291798546" name="call_notification_decline_action">"Ablehnen"</string>
+    <string msgid="2659457946726154263" name="call_notification_hang_up_action">"Auflegen"</string>
+    <string msgid="6107532579223922871" name="call_notification_incoming_text">"Eingehender Anruf"</string>
+    <string msgid="8623827134497363134" name="call_notification_ongoing_text">"Aktueller Anruf"</string>
+    <string msgid="59049573811482460" name="call_notification_screening_text">"Filter für eingehenden Anruf"</string>
+    <string name="exo_controls_cc_disabled_description">Untertitel aktivieren</string>
+    <string name="exo_controls_cc_enabled_description">Untertitel deaktivieren</string>
+    <string name="exo_controls_fastforward_description">Vorspulen</string>
+    <string name="exo_controls_fullscreen_enter_description">Vollbild aktivieren</string>
+    <string name="exo_controls_fullscreen_exit_description">Vollbild beenden</string>
+    <string name="exo_controls_hide">Player-Steuerelemente ausblenden</string>
+    <string name="exo_controls_next_description">Weiter</string>
+    <string name="exo_controls_overflow_hide_description">Zusätzliche Einstellungen ausblenden</string>
+    <string name="exo_controls_overflow_show_description">Zusätzliche Einstellungen einblenden</string>
+    <string name="exo_controls_pause_description">Pausieren</string>
+    <string name="exo_controls_play_description">Wiedergeben</string>
+    <string name="exo_controls_playback_speed">Geschwindigkeit</string>
+    <string name="exo_controls_previous_description">Zurück</string>
+    <string name="exo_controls_repeat_all_description">Aktueller Modus: alles wiederholen. Wiederholungsmodus ändern.</string>
+    <string name="exo_controls_repeat_off_description">Aktueller Modus: nichts wiederholen. Wiederholungsmodus ändern.</string>
+    <string name="exo_controls_repeat_one_description">Aktueller Modus: einen Titel wiederholen. Wiederholungsmodus ändern.</string>
+    <string name="exo_controls_rewind_description">Zurückspulen</string>
+    <string name="exo_controls_seek_bar_description">Wiedergabefortschritt</string>
+    <string name="exo_controls_settings_description">Einstellungen</string>
+    <string name="exo_controls_show">Player-Steuerelemente anzeigen</string>
+    <string name="exo_controls_shuffle_off_description">Zufallsmix aktivieren</string>
+    <string name="exo_controls_shuffle_on_description">Zufallsmix deaktivieren</string>
+    <string name="exo_controls_stop_description">Beenden</string>
+    <string name="exo_controls_vr_description">VR-Modus</string>
+    <string name="exo_download_completed">Download abgeschlossen</string>
+    <string name="exo_download_description">Herunterladen</string>
+    <string name="exo_download_downloading">Wird heruntergeladen</string>
+    <string name="exo_download_failed">Download fehlgeschlagen</string>
+    <string name="exo_download_notification_channel_name">Downloads</string>
+    <string name="exo_download_paused">Downloads pausiert</string>
+    <string name="exo_download_paused_for_network">Auf Netzwerkverbindung wird gewartet</string>
+    <string name="exo_download_paused_for_wifi">Auf WLAN-Verbindung wird gewartet</string>
+    <string name="exo_download_removing">Downloads werden entfernt</string>
+    <string name="exo_item_list">%1$s, %2$s</string>
+    <string name="exo_track_bitrate">%1$.2f Mbit/s</string>
+    <string name="exo_track_mono">Mono</string>
+    <string name="exo_track_resolution">%1$d × %2$d</string>
+    <string name="exo_track_role_alternate">Alternativer Track</string>
+    <string name="exo_track_role_closed_captions">Untertitel</string>
+    <string name="exo_track_role_commentary">Kommentare</string>
+    <string name="exo_track_role_supplementary">Zusatzinhalte</string>
+    <string name="exo_track_selection_auto">Automatisch</string>
+    <string name="exo_track_selection_none">Ohne</string>
+    <string name="exo_track_selection_title_audio">Audio</string>
+    <string name="exo_track_selection_title_text">Text</string>
+    <string name="exo_track_selection_title_video">Video</string>
+    <string name="exo_track_stereo">Stereo</string>
+    <string name="exo_track_surround">Surround-Sound</string>
+    <string name="exo_track_surround_5_point_1">5.1-Surround-Sound</string>
+    <string name="exo_track_surround_7_point_1">7.1-Surround-Sound</string>
+    <string name="exo_track_unknown">Unbekannt</string>
+    <string msgid="4657191930956702614" name="lb_control_display_fast_forward_multiplier">"%1$dX"</string>
+    <string msgid="4597148235912710942" name="lb_control_display_rewind_multiplier">"%1$dX"</string>
+    <string msgid="893619591225519922" name="lb_guidedaction_continue_title">"Weiter"</string>
+    <string msgid="3330958750346333890" name="lb_guidedaction_finish_title">"Fertig"</string>
+    <string msgid="3228326776757666747" name="lb_media_player_error">"MediaPlayer-Fehlercode %1$d extra %2$d"</string>
+    <string msgid="8084428500709675515" name="lb_navigation_menu_contentDescription">"Navigationsmenü"</string>
+    <string msgid="2394451791544864917" name="lb_onboarding_accessibility_next">"Weiter"</string>
+    <string msgid="5549711907371161292" name="lb_onboarding_get_started">"JETZT STARTEN"</string>
+    <string msgid="8691966842977635128" name="lb_playback_controls_closed_captioning_disable">"Untertitel deaktivieren"</string>
+    <string msgid="2346334170216706076" name="lb_playback_controls_closed_captioning_enable">"Untertitel aktivieren"</string>
+    <string msgid="740570111678243493" name="lb_playback_controls_fast_forward">"Vorspulen"</string>
+    <string msgid="5734614175721471329" name="lb_playback_controls_fast_forward_multiplier">"Vorspulen %1$dX"</string>
+    <string msgid="5859666950961624736" name="lb_playback_controls_hidden">"Mediensteuerelemente ausgeblendet. Drücke das Steuerkreuz, um die Steuerelemente wieder einzublenden"</string>
+    <string msgid="1209119371486219736" name="lb_playback_controls_high_quality_disable">"Hohe Qualität deaktivieren"</string>
+    <string msgid="3057698527166674705" name="lb_playback_controls_high_quality_enable">"Hohe Qualität aktivieren"</string>
+    <string msgid="8730341244454469032" name="lb_playback_controls_more_actions">"Weitere Aktionen"</string>
+    <string msgid="917331776961802657" name="lb_playback_controls_pause">"Pausieren"</string>
+    <string msgid="5770668162543767702" name="lb_playback_controls_picture_in_picture">"Bild-im-Bild-Modus aktivieren"</string>
+    <string msgid="7088090604803481121" name="lb_playback_controls_play">"Wiedergeben"</string>
+    <string msgid="8429099206716245199" name="lb_playback_controls_repeat_all">"Alle wiederholen"</string>
+    <string msgid="1614290959784265209" name="lb_playback_controls_repeat_none">"Kein Element wiederholen"</string>
+    <string msgid="676658705837320560" name="lb_playback_controls_repeat_one">"Ein Element wiederholen"</string>
+    <string msgid="2866333981131020771" name="lb_playback_controls_rewind">"Zurückspulen"</string>
+    <string msgid="6038956370475252734" name="lb_playback_controls_rewind_multiplier">"Zurückspulen %1$dX"</string>
+    <string msgid="8690223891515602822" name="lb_playback_controls_shown">"Mediensteuerelemente eingeblendet"</string>
+    <string msgid="6793109999253893369" name="lb_playback_controls_shuffle_disable">"Zufallsmix deaktivieren"</string>
+    <string msgid="5151681938752704485" name="lb_playback_controls_shuffle_enable">"Zufallsmix aktivieren"</string>
+    <string msgid="8117512422682146745" name="lb_playback_controls_skip_next">"Nächstes Element überspringen"</string>
+    <string msgid="3481218248309447059" name="lb_playback_controls_skip_previous">"Vorheriges Element überspringen"</string>
+    <string msgid="3544533410444618518" name="lb_playback_controls_thumb_down">"\"Mag ich nicht\" deaktivieren"</string>
+    <string msgid="8475278766138652105" name="lb_playback_controls_thumb_down_outline">"\"Mag ich nicht\" aktivieren"</string>
+    <string msgid="3458671378107738666" name="lb_playback_controls_thumb_up">"\"Mag ich\" deaktivieren"</string>
+    <string msgid="1385865732502550659" name="lb_playback_controls_thumb_up_outline">"\"Mag ich\" aktivieren"</string>
+    <string msgid="1471121602610716654" name="lb_playback_time_separator">"/"</string>
+    <string msgid="5700349211583074131" name="lb_search_bar_hint">"Suche"</string>
+    <string msgid="5926531297066387462" name="lb_search_bar_hint_speech">"Zum Suchen sprechen"</string>
+    <string msgid="4826526877249029043" name="lb_search_bar_hint_with_title">"In <ns1:g id="SEARCH_CONTEXT">%1$s</ns1:g> suchen"</string>
+    <string msgid="6032250334706920550" name="lb_search_bar_hint_with_title_speech">"Zum Suchen in <ns1:g id="SEARCH_CONTEXT">%1$s</ns1:g> sprechen"</string>
+    <string msgid="1301877238242752863" name="orb_search_action">"Suchvorgang"</string>
+    <string msgid="6264217191555673260" name="search_menu_title">"Suche"</string>
+    <string msgid="6277540029070332960" name="status_bar_notification_info_overflow">"999+"</string>
+</resources>

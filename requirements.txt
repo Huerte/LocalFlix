@@ -1,0 +1,12 @@
+# Required
+flask>=3.0
+
+# Optional but recommended — faster production server
+waitress>=3.0
+
+# Optional — better subtitle charset detection (handles Russian, Japanese, Chinese, etc.)
+charset-normalizer>=3.0
+
+# Optional — enables http://localflix.local:8080 (works without knowing the laptop IP)
+# Devices find the server by name, even if the IP changes.
+zeroconf>=0.132

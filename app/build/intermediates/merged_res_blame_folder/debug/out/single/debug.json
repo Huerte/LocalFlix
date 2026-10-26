@@ -1,0 +1,42 @@
+[
+    {
+        "merged": "com.sarge.localflix.app-merged_res-4:/layout_item_movie.xml.flat",
+        "source": "com.sarge.localflix.app-main-6:/layout/item_movie.xml"
+    },
+    {
+        "merged": "com.sarge.localflix.app-merged_res-4:/drawable_bg_ext_badge.xml.flat",
+        "source": "com.sarge.localflix.app-main-6:/drawable/bg_ext_badge.xml"
+    },
+    {
+        "merged": "com.sarge.localflix.app-merged_res-4:/drawable_bg_movie_card.xml.flat",
+        "source": "com.sarge.localflix.app-main-6:/drawable/bg_movie_card.xml"
+    },
+    {
+        "merged": "com.sarge.localflix.app-merged_res-4:/layout_activity_main.xml.flat",
+        "source": "com.sarge.localflix.app-main-6:/layout/activity_main.xml"
+    },
+    {
+        "merged": "com.sarge.localflix.app-merged_res-4:/layout_activity_player.xml.flat",
+        "source": "com.sarge.localflix.app-main-6:/layout/activity_player.xml"
+    },
+    {
+        "merged": "com.sarge.localflix.app-merged_res-4:/drawable_bg_search.xml.flat",
+        "source": "com.sarge.localflix.app-main-6:/drawable/bg_search.xml"
+    },
+    {
+        "merged": "com.sarge.localflix.app-merged_res-4:/drawable_ic_launcher.xml.flat",
+        "source": "com.sarge.localflix.app-main-6:/drawable/ic_launcher.xml"
+    },
+    {
+        "merged": "com.sarge.localflix.app-merged_res-4:/drawable_ic_banner.xml.flat",
+        "source": "com.sarge.localflix.app-main-6:/drawable/ic_banner.xml"
+    },
+    {
+        "merged": "com.sarge.localflix.app-merged_res-4:/drawable_bg_thumb.xml.flat",
+        "source": "com.sarge.localflix.app-main-6:/drawable/bg_thumb.xml"
+    },
+    {
+        "merged": "com.sarge.localflix.app-merged_res-4:/drawable_bg_icon_btn.xml.flat",
+        "source": "com.sarge.localflix.app-main-6:/drawable/bg_icon_btn.xml"
+    }
+]

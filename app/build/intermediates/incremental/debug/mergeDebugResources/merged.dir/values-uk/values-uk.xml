@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:ns1="urn:oasis:names:tc:xliff:document:1.2">
+    <string-array name="exo_controls_playback_speeds">
+    <item>0,25x</item>
+    <item>0,5x</item>
+    <item>0,75x</item>
+    <item>Звичайна</item>
+    <item>1,25x</item>
+    <item>1,5x</item>
+    <item>2x</item>
+  </string-array>
+    <plurals name="exo_controls_fastforward_by_amount_description">
+    <item quantity="one">Перемотати вперед на %d секунду</item>
+    <item quantity="few">Перемотати вперед на %d секунди</item>
+    <item quantity="many">Перемотати вперед на %d секунд</item>
+    <item quantity="other">Перемотати вперед на %d секунди</item>
+  </plurals>
+    <plurals name="exo_controls_rewind_by_amount_description">
+    <item quantity="one">Перемотати назад на %d секунду</item>
+    <item quantity="few">Перемотати назад на %d секунди</item>
+    <item quantity="many">Перемотати назад на %d секунд</item>
+    <item quantity="other">Перемотати назад на %d секунди</item>
+  </plurals>
+    <string msgid="5976598919945601918" name="abc_action_bar_home_description">"Перейти на головну"</string>
+    <string msgid="8388173803310557296" name="abc_action_bar_up_description">"Перейти вгору"</string>
+    <string msgid="3937310113216875497" name="abc_action_menu_overflow_description">"Більше опцій"</string>
+    <string msgid="4692188335987374352" name="abc_action_mode_done">"Готово"</string>
+    <string msgid="1189761859438369441" name="abc_activity_chooser_view_see_all">"Показати всі"</string>
+    <string msgid="2165779757652331008" name="abc_activitychooserview_choose_application">"Вибрати програму"</string>
+    <string msgid="4215997306490295099" name="abc_capital_off">"ЗНИЖКА"</string>
+    <string msgid="884982626291842264" name="abc_capital_on">"УВІМК."</string>
+    <string msgid="8833365367933412986" name="abc_menu_alt_shortcut_label">"Alt+"</string>
+    <string msgid="2223301931652355242" name="abc_menu_ctrl_shortcut_label">"Ctrl+"</string>
+    <string msgid="838001238306846836" name="abc_menu_delete_shortcut_label">"delete"</string>
+    <string msgid="7986526966204849475" name="abc_menu_enter_shortcut_label">"enter"</string>
+    <string msgid="375214403600139847" name="abc_menu_function_shortcut_label">"Function+"</string>
+    <string msgid="4192209724446364286" name="abc_menu_meta_shortcut_label">"Meta+"</string>
+    <string msgid="4741552369836443843" name="abc_menu_shift_shortcut_label">"Shift+"</string>
+    <string msgid="5473865519181928982" name="abc_menu_space_shortcut_label">"пробіл"</string>
+    <string msgid="6180552449598693998" name="abc_menu_sym_shortcut_label">"Sym+"</string>
+    <string msgid="5520303668377388990" name="abc_prepend_shortcut_label">"Menu+"</string>
+    <string msgid="7208076849092622260" name="abc_search_hint">"Введіть пошуковий запит…"</string>
+    <string msgid="3741173234950517107" name="abc_searchview_description_clear">"Очистити запит"</string>
+    <string msgid="693312494995508443" name="abc_searchview_description_query">"Пошуковий запит"</string>
+    <string msgid="3417662926640357176" name="abc_searchview_description_search">"Пошук"</string>
+    <string msgid="1486535517437947103" name="abc_searchview_description_submit">"Наіслати запит"</string>
+    <string msgid="2293578557972875415" name="abc_searchview_description_voice">"Голосовий пошук"</string>
+    <string msgid="8875138169939072951" name="abc_shareactionprovider_share_with">"Поділитися:"</string>
+    <string msgid="9055268688411532828" name="abc_shareactionprovider_share_with_application">"Поділитися через додаток <ns1:g id="APPLICATION_NAME">%s</ns1:g>"</string>
+    <string msgid="1656852541809559762" name="abc_toolbar_collapse_description">"Згорнути"</string>
+    <string msgid="881409763997275156" name="call_notification_answer_action">"Відповісти"</string>
+    <string msgid="8793775615905189152" name="call_notification_answer_video_action">"Відео"</string>
+    <string msgid="3229508546291798546" name="call_notification_decline_action">"Відхилити"</string>
+    <string msgid="2659457946726154263" name="call_notification_hang_up_action">"Завершити"</string>
+    <string msgid="6107532579223922871" name="call_notification_incoming_text">"Вхідний виклик"</string>
+    <string msgid="8623827134497363134" name="call_notification_ongoing_text">"Активний виклик"</string>
+    <string msgid="59049573811482460" name="call_notification_screening_text">"Вхідний виклик (Фільтр)"</string>
+    <string name="exo_controls_cc_disabled_description">Увімкнути субтитри</string>
+    <string name="exo_controls_cc_enabled_description">Вимкнути субтитри</string>
+    <string name="exo_controls_fastforward_description">Перемотати вперед</string>
+    <string name="exo_controls_fullscreen_enter_description">Перейти в повноекранний режим</string>
+    <string name="exo_controls_fullscreen_exit_description">Вийти з повноекранного режиму</string>
+    <string name="exo_controls_hide">Сховати елементи керування програвачем</string>
+    <string name="exo_controls_next_description">Далі</string>
+    <string name="exo_controls_overflow_hide_description">Сховати додаткові налаштування</string>
+    <string name="exo_controls_overflow_show_description">Показати додаткові налаштування</string>
+    <string name="exo_controls_pause_description">Призупинити</string>
+    <string name="exo_controls_play_description">Відтворити</string>
+    <string name="exo_controls_playback_speed">Швидкість</string>
+    <string name="exo_controls_previous_description">Назад</string>
+    <string name="exo_controls_repeat_all_description">Поточний режим: повторювати все. Перемкнути режим повторення.</string>
+    <string name="exo_controls_repeat_off_description">Поточний режим: не повторювати. Перемкнути режим повторення.</string>
+    <string name="exo_controls_repeat_one_description">Поточний режим: повторювати один медіафайл. Перемкнути режим повторення.</string>
+    <string name="exo_controls_rewind_description">Перемотати назад</string>
+    <string name="exo_controls_seek_bar_description">Прогрес відтворення</string>
+    <string name="exo_controls_settings_description">Налаштування</string>
+    <string name="exo_controls_show">Показувати елементи керування програвачем</string>
+    <string name="exo_controls_shuffle_off_description">Увімкнути режим перемішування</string>
+    <string name="exo_controls_shuffle_on_description">Вимкнути режим перемішування</string>
+    <string name="exo_controls_stop_description">Припинити</string>
+    <string name="exo_controls_vr_description">Режим віртуальної реальності</string>
+    <string name="exo_download_completed">Завантаження завершено</string>
+    <string name="exo_download_description">Завантажити</string>
+    <string name="exo_download_downloading">Завантажується</string>
+    <string name="exo_download_failed">Не вдалося завантажити</string>
+    <string name="exo_download_notification_channel_name">Завантаження</string>
+    <string name="exo_download_paused">Завантаження призупинено</string>
+    <string name="exo_download_paused_for_network">Очікується підключення до мережі</string>
+    <string name="exo_download_paused_for_wifi">Очікується підключення до Wi-Fi</string>
+    <string name="exo_download_removing">Завантаження видаляються</string>
+    <string name="exo_item_list">%1$s, %2$s</string>
+    <string name="exo_track_bitrate">%1$.2f Мбіт/с</string>
+    <string name="exo_track_mono">Моно</string>
+    <string name="exo_track_resolution">%1$d × %2$d</string>
+    <string name="exo_track_role_alternate">Альтернативна</string>
+    <string name="exo_track_role_closed_captions">Субтитри</string>
+    <string name="exo_track_role_commentary">Коментарі</string>
+    <string name="exo_track_role_supplementary">Додаткова</string>
+    <string name="exo_track_selection_auto">Автоматично</string>
+    <string name="exo_track_selection_none">Нічого</string>
+    <string name="exo_track_selection_title_audio">Аудіо</string>
+    <string name="exo_track_selection_title_text">Текст</string>
+    <string name="exo_track_selection_title_video">Відео</string>
+    <string name="exo_track_stereo">Стерео</string>
+    <string name="exo_track_surround">Об’ємний звук</string>
+    <string name="exo_track_surround_5_point_1">Об’ємний звук у форматі 5.1</string>
+    <string name="exo_track_surround_7_point_1">Об’ємний звук у форматі 7.1</string>
+    <string name="exo_track_unknown">Невідомо</string>
+    <string msgid="4657191930956702614" name="lb_control_display_fast_forward_multiplier">"%1$dX"</string>
+    <string msgid="4597148235912710942" name="lb_control_display_rewind_multiplier">"%1$dX"</string>
+    <string msgid="893619591225519922" name="lb_guidedaction_continue_title">"Продовжити"</string>
+    <string msgid="3330958750346333890" name="lb_guidedaction_finish_title">"Готово"</string>
+    <string msgid="3228326776757666747" name="lb_media_player_error">"Код помилки MediaPlayer: %1$d extra %2$d"</string>
+    <string msgid="8084428500709675515" name="lb_navigation_menu_contentDescription">"Меню навігації"</string>
+    <string msgid="2394451791544864917" name="lb_onboarding_accessibility_next">"Далі"</string>
+    <string msgid="5549711907371161292" name="lb_onboarding_get_started">"ПОЧАТИ"</string>
+    <string msgid="8691966842977635128" name="lb_playback_controls_closed_captioning_disable">"Вимкнути субтитри"</string>
+    <string msgid="2346334170216706076" name="lb_playback_controls_closed_captioning_enable">"Увімкнути субтитри"</string>
+    <string msgid="740570111678243493" name="lb_playback_controls_fast_forward">"Перемотати вперед"</string>
+    <string msgid="5734614175721471329" name="lb_playback_controls_fast_forward_multiplier">"Перемотати вперед – %1$dX"</string>
+    <string msgid="5859666950961624736" name="lb_playback_controls_hidden">"Елементи керування медіа сховано. Натисніть цифрову панель, щоб показати їх"</string>
+    <string msgid="1209119371486219736" name="lb_playback_controls_high_quality_disable">"Вимкнути високу якість"</string>
+    <string msgid="3057698527166674705" name="lb_playback_controls_high_quality_enable">"Увімкнути високу якість"</string>
+    <string msgid="8730341244454469032" name="lb_playback_controls_more_actions">"Більше команд"</string>
+    <string msgid="917331776961802657" name="lb_playback_controls_pause">"Призупинити"</string>
+    <string msgid="5770668162543767702" name="lb_playback_controls_picture_in_picture">"Перейти в режим \"Картинка в картинці\""</string>
+    <string msgid="7088090604803481121" name="lb_playback_controls_play">"Відтворити"</string>
+    <string msgid="8429099206716245199" name="lb_playback_controls_repeat_all">"Повторити все"</string>
+    <string msgid="1614290959784265209" name="lb_playback_controls_repeat_none">"Не повторювати"</string>
+    <string msgid="676658705837320560" name="lb_playback_controls_repeat_one">"Повторити один елемент"</string>
+    <string msgid="2866333981131020771" name="lb_playback_controls_rewind">"Перемотати назад"</string>
+    <string msgid="6038956370475252734" name="lb_playback_controls_rewind_multiplier">"Перемотати назад – %1$dX"</string>
+    <string msgid="8690223891515602822" name="lb_playback_controls_shown">"Елементи керування медіа показано"</string>
+    <string msgid="6793109999253893369" name="lb_playback_controls_shuffle_disable">"Вимкнути перемішування"</string>
+    <string msgid="5151681938752704485" name="lb_playback_controls_shuffle_enable">"Увімкнути перемішування"</string>
+    <string msgid="8117512422682146745" name="lb_playback_controls_skip_next">"Пропустити наступний елемент"</string>
+    <string msgid="3481218248309447059" name="lb_playback_controls_skip_previous">"Пропустити попередній елемент"</string>
+    <string msgid="3544533410444618518" name="lb_playback_controls_thumb_down">"Не вибирати оцінку \"Не подобається\""</string>
+    <string msgid="8475278766138652105" name="lb_playback_controls_thumb_down_outline">"Вибрати оцінку \"Не подобається\""</string>
+    <string msgid="3458671378107738666" name="lb_playback_controls_thumb_up">"Не вибирати оцінку \"Подобається\""</string>
+    <string msgid="1385865732502550659" name="lb_playback_controls_thumb_up_outline">"Вибрати оцінку \"Подобається\""</string>
+    <string msgid="1471121602610716654" name="lb_playback_time_separator">"/"</string>
+    <string msgid="5700349211583074131" name="lb_search_bar_hint">"Пошук"</string>
+    <string msgid="5926531297066387462" name="lb_search_bar_hint_speech">"Продиктуйте пошуковий запит"</string>
+    <string msgid="4826526877249029043" name="lb_search_bar_hint_with_title">"Шукати: <ns1:g id="SEARCH_CONTEXT">%1$s</ns1:g>"</string>
+    <string msgid="6032250334706920550" name="lb_search_bar_hint_with_title_speech">"Продиктуйте, щоб шукати: <ns1:g id="SEARCH_CONTEXT">%1$s</ns1:g>"</string>
+    <string msgid="1301877238242752863" name="orb_search_action">"Команда пошуку"</string>
+    <string msgid="6264217191555673260" name="search_menu_title">"Пошук"</string>
+    <string msgid="6277540029070332960" name="status_bar_notification_info_overflow">"999+"</string>
+</resources>

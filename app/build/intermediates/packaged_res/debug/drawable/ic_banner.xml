@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android TV requires a 320x180dp banner for the launcher row -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp"
+    android:height="180dp"
+    android:viewportWidth="320"
+    android:viewportHeight="180">
+    <path
+        android:fillColor="#070711"
+        android:pathData="M0,0h320v180H0z"/>
+    <!-- Play triangle -->
+    <path
+        android:fillColor="#F59E0B"
+        android:pathData="M50,55 L50,125 L110,90 Z"/>
+    <!-- LocalFlix text (represented as accent bar) -->
+    <path
+        android:fillColor="#F59E0B"
+        android:pathData="M130,80 L310,80 L310,88 L130,88 Z"/>
+    <path
+        android:fillColor="#5A617E"
+        android:pathData="M130,96 L250,96 L250,102 L130,102 Z"/>
+</vector>

@@ -1,0 +1,562 @@
+/* LocalFlix main application: utilities, routing, home page, browse, movie detail, settings. */
+'use strict';
+(function () {
+  const LF = window.LF = {};
+  const $ = LF.$ = (sel, ctx) => (ctx || document).querySelector(sel);
+  const $$ = LF.$$ = (sel, ctx) => Array.from((ctx || document).querySelectorAll(sel));
+  const esc = LF.esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  LF.fmtTime = function (s) {
+    s = Math.max(0, Math.round(s || 0));
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+    return h ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}` : `${m}:${String(sec).padStart(2, '0')}`;
+  };
+  LF.api = async function (path, opts) {
+    const r = await fetch(path, opts);
+    if (!r.ok) { const t = await r.text().catch(() => ''); throw new Error(t || r.status); }
+    return r.json();
+  };
+
+  /* ---- storage ---- */
+  const store = LF.store = {
+    get(k, def) { try { const v = localStorage.getItem(k); return v == null ? def : JSON.parse(v); } catch { return def; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* quota */ } },
+  };
+
+  /* ---- prefs ---- */
+  const DEF = { subsOn: true, subLang: '', autoNext: true, playMode: 'auto', volume: 1, muted: false, fit: 'contain', speed: 1, subStyle: { size: 100, color: '#ffffff', bg: 'outline', pos: 8 } };
+  const saved = store.get('lf.prefs', {}) || {};
+  LF.prefs = Object.assign({}, DEF, saved, { subStyle: Object.assign({}, DEF.subStyle, saved.subStyle || {}) });
+  LF.savePrefs = function () { store.set('lf.prefs', LF.prefs); };
+
+  /* ---- progress ---- */
+  LF.progress = {
+    _all() { return store.get('lf.progress', {}) || {}; },
+    get(id) { return this._all()[id]; },
+    set(id, t, dur) { const a = this._all(); a[id] = { t, d: dur, ts: Date.now() }; store.set('lf.progress', a); },
+    markWatched(id) { const a = this._all(); if (a[id]) { a[id].watched = true; a[id].t = null; } else { a[id] = { watched: true }; } store.set('lf.progress', a); },
+  };
+
+  /* ---- modal system ---- */
+  let modalEl = null;
+  let modals = [];
+  function openModal(html, opts = {}) {
+    closeModal();
+    const scrim = document.createElement('div');
+    scrim.className = 'scrim'; scrim.setAttribute('role', 'dialog'); scrim.setAttribute('aria-modal', 'true');
+    scrim.innerHTML = html;
+    $('#modalRoot').appendChild(scrim);
+    document.body.classList.add('noscroll');
+    modalEl = scrim;
+    const close = (silent) => {
+      if (modalEl !== scrim) return;
+      scrim.remove(); modalEl = null;
+      if (!$('#player:not([hidden])')) document.body.classList.remove('noscroll');
+      if (!silent && opts.onClose) opts.onClose();
+    };
+    scrim.addEventListener('mousedown', (e) => { if (e.target === scrim) close(); });
+    const obj = { el: scrim, close };
+    modals.push(obj);
+    return obj;
+  }
+  function closeModal(silent) {
+    if (modalEl) { modalEl.remove(); modalEl = null; }
+    modals = [];
+    if (!$('#player:not([hidden])')) document.body.classList.remove('noscroll');
+  }
+  LF.closeOverlay = function () {
+    if (modalEl) { closeModal(); if (LF.fromPage) history.back(); else location.hash = '#/'; }
+    else if (LF.player && LF.player.active) { LF.player.close(); }
+  };
+  LF.toast = function (msg) {
+    const t = document.createElement('div');
+    t.className = 'toast'; t.textContent = msg;
+    $('#toasts').appendChild(t);
+    setTimeout(() => t.remove(), 3000);
+  };
+
+  /* ---- data ---- */
+  LF.movies = []; LF.info = null; LF.offline = false; LF.tv = /android|googletv|hbbtv|netcast/i.test(navigator.userAgent);
+  const norm = (s) => s.toLowerCase().replace(/[''`]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+  const sortKey = (s) => s.replace(/^(the|a|an)\s+/i, '').toLowerCase().replace(/(\d+)/g, (m) => m.padStart(6, '0'));
+  function prep(list) {
+    list.forEach((m) => { m._k = sortKey(m.title); m._tn = norm(m.title); m._tok = norm([m.title, m.year, m.folder].join(' ')).split(/\s+/); });
+    return list;
+  }
+
+  /* ---- search ---- */
+  const norm2 = (s) => norm(s).split(/\s+/).filter(Boolean);
+  function score(m, q) {
+    const words = norm2(q);
+    if (!words.length) return 1;
+    const t = m._tn, toks = m._tok;
+    let s = 0;
+    for (const w of words) {
+      if (toks.some((tk) => tk === w)) s += 3;
+      else if (toks.some((tk) => tk.startsWith(w))) s += 2;
+      else if (t.includes(w)) s += 1;
+      else { s -= 5; }
+    }
+    return s;
+  }
+  LF.searchMovies = function (q) {
+    if (!q) return LF.movies.slice();
+    const scored = LF.movies.map((m) => ({ m, s: score(m, q) })).filter((x) => x.s > 0);
+    scored.sort((a, b) => b.s - a.s);
+    return scored.map((x) => x.m);
+  };
+  function byId(id) { return LF.movies.find((m) => m.id === id); }
+
+  /* ---- poster image ---- */
+  function posterEl(m, cls) {
+    const prog = LF.progress.get(m.id);
+    const pct = prog && prog.d ? Math.round(prog.t / prog.d * 100) : 0;
+    const watched = prog && prog.watched;
+    return `<div class="poster ${cls || ''}" data-id="${m.id}"><div class="ph ${m.poster !== 'ready' ? 'shim' : ''}">${m.poster === 'ready' ? `<img data-p="1" alt="" src="/poster/${m.id}?v=${m.pv}" loading="lazy">` : `<b>${esc(m.title)}</b><small>${m.year || m.ext}</small>`}</div>${m.subs ? '<div class="badges"><span class="badge cc">CC</span></div>' : ''}</div>${pct > 3 && !watched ? `<div class="prog"><i style="width:${pct}%"></i></div>` : ''}`;
+  }
+  function settleImages(root) {
+    (root || document).querySelectorAll('img[data-p]').forEach((img) => {
+      if (img.complete) { img.classList.add('ld'); return; }
+      img.addEventListener('load', () => img.classList.add('ld'), { once: true });
+    });
+  }
+
+  /* ---- card ---- */
+  function card(m) {
+    const prog = LF.progress.get(m.id);
+    return `<a class="card" href="#/movie/${m.id}" data-id="${m.id}" aria-label="${esc(m.title)}${m.year ? ' (' + m.year + ')' : ''}" role="article">
+      ${posterEl(m)}
+      <div class="c-t">${esc(m.title)}</div>
+      <div class="c-m">${[m.year, m.ext].filter(Boolean).join(' · ')}</div>
+    </a>`;
+  }
+
+  /* ---- render states ---- */
+  function errorState(msg) {
+    return `<div class="state"><svg class="ic"><use href="#i-alert"/></svg><h2>Cannot reach server</h2><p>${esc(msg)}</p></div>`;
+  }
+  function emptyState(msg) {
+    return `<div class="state"><svg class="ic"><use href="#i-film"/></svg><h2>No movies found</h2><p>${esc(msg)}</p></div>`;
+  }
+
+  /* ---- home ---- */
+  function renderHome() {
+    const main = $('#main');
+    const movies = LF.movies;
+    if (!movies.length) {
+      main.innerHTML = emptyState('Add some video files to your movies folder, then refresh.');
+      return;
+    }
+    const addedSort = movies.slice().sort((a, b) => b.added - a.added);
+    const recent30 = addedSort.slice(0, 30);
+    const hero = recent30[0];
+    const info = LF.info || {};
+    const heroMeta = posters.infoCache ? posters.infoCache[hero.id] : {};
+    function rowHtml(title, list, limit = 18) {
+      const items = list.slice(0, limit);
+      if (!items.length) return '';
+      return `<section class="sec" aria-labelledby="r-${title.replace(/\s/g,'')}">
+        <div class="sec-h"><h2 id="r-${title.replace(/\s/g,'')}">${esc(title)}</h2></div>
+        <div class="row-wrap"><div class="row" id="row-${title.replace(/\s/g,'')}">
+          ${items.map(card).join('')}
+        </div>
+        <button class="row-nav l" type="button" aria-label="Scroll left" onclick="scrollRow(this,-1)"><svg class="ic"><use href="#i-chev"/></svg></button>
+        <button class="row-nav r" type="button" aria-label="Scroll right" onclick="scrollRow(this,1)"><svg class="ic"><use href="#i-chev"/></svg></button>
+        </div></section>`;
+    }
+    window.scrollRow = function(btn, dir) {
+      const row = btn.parentNode.querySelector('.row');
+      if (row) row.scrollBy({ left: dir * 680, behavior: 'smooth' });
+    };
+    const genres = {};
+    movies.forEach((m) => { if (m.genre) (genres[m.genre] = genres[m.genre] || []).push(m); });
+    const folders = {};
+    movies.forEach((m) => { if (m.folder) (folders[m.folder] = folders[m.folder] || []).push(m); });
+    const folderRows = Object.entries(folders).sort((a, b) => b[1].length - a[1].length).slice(0, 3)
+      .map(([f, ms]) => rowHtml(f, ms)).join('');
+    const heroOv = '';
+    const heroPoster = hero.poster === 'ready' ? `url('/poster/${hero.id}?v=${hero.pv}')` : '';
+    main.innerHTML = `<div class="page">
+      <div class="hero">
+        ${heroPoster ? `<div class="hero-bg" style="background-image:${heroPoster}"></div>` : ''}
+        <div class="hero-shade"></div>
+        <div class="hero-in">
+          <div class="hero-poster">${posterEl(hero)}</div>
+          <div class="hero-txt">
+            <div class="eyebrow">Just Added</div>
+            <h1>${esc(hero.title)}</h1>
+            <div class="meta"><span>${hero.year || ''}</span>${hero.year ? '<span class="dot"></span>' : ''}<span>${hero.ext}</span>${hero.subs ? '<span class="dot"></span><span>Subtitles</span>' : ''}</div>
+            <div class="actions">
+              <a class="btn primary" href="#/watch/${hero.id}"><svg class="ic"><use href="#i-play"/></svg>Play</a>
+              <a class="btn ghost" href="#/movie/${hero.id}">More info</a>
+            </div>
+          </div>
+        </div>
+      </div>
+      ${rowHtml('Recently Added', recent30, 16)}
+      ${rowHtml('All Movies', movies.slice().sort((a, b) => a._k.localeCompare(b._k)), 24)}
+      ${folderRows}
+    </div>`;
+    settleImages(main);
+  }
+  const posters = { infoCache: null };
+
+  /* ---- browse ---- */
+  let bstate = { q: '', sort: 'name', dir: 'asc', subs: false };
+  function applyBrowse(movies) {
+    let list = movies.slice();
+    if (bstate.q) list = LF.searchMovies(bstate.q);
+    if (bstate.subs) list = list.filter((m) => m.subs > 0);
+    list.sort((a, b) => {
+      let v = 0;
+      if (bstate.sort === 'name') v = a._k.localeCompare(b._k);
+      else if (bstate.sort === 'year') v = (a.year || 0) - (b.year || 0);
+      else if (bstate.sort === 'added') v = a.added - b.added;
+      else if (bstate.sort === 'size') v = a.size - b.size;
+      return bstate.dir === 'desc' ? -v : v;
+    });
+    return list;
+  }
+  function setBrowse(patch) { Object.assign(bstate, patch); if (page === 'browse') renderBrowse(); }
+  function renderBrowse(q) {
+    if (q) { bstate = Object.assign({}, bstate, q); }
+    const main = $('#main');
+    const filtered = applyBrowse(LF.movies);
+    const dirIcon = bstate.dir === 'asc' ? '#i-up' : '#i-down';
+    const dirLabel = bstate.dir === 'asc' ? 'A to Z' : 'Z to A';
+    const qHtml = bstate.q ? `<span class="qtag">"${esc(bstate.q)}" <button type="button" aria-label="Clear search" onclick="LF._browse({q:''})"><svg class="ic"><use href="#i-close"/></svg></button></span>` : '';
+    main.innerHTML = `<div class="page">
+      <div class="ph1"><h1>Browse <span class="count">(${filtered.length})</span></h1>${qHtml}</div>
+      <div class="toolbar" role="toolbar" aria-label="Filter and sort">
+        <span class="tb-lbl">Sort:</span>
+        <select id="fSort" class="tb-select" aria-label="Sort by" onchange="LF._browse({sort:this.value})">
+          <option value="name"${bstate.sort==='name'?' selected':''}>Name</option>
+          <option value="added"${bstate.sort==='added'?' selected':''}>Date Added</option>
+          <option value="year"${bstate.sort==='year'?' selected':''}>Year</option>
+          <option value="size"${bstate.sort==='size'?' selected':''}>File Size</option>
+        </select>
+        <button class="tb-btn" id="fDir" type="button" aria-label="Toggle sort order" onclick="LF._browse({dir:LF._bs.dir==='asc'?'desc':'asc'})">
+          <svg class="ic"><use href="${dirIcon}"/></svg>${dirLabel}
+        </button>
+        <div class="tb-sep" aria-hidden="true"></div>
+        <button class="tb-btn${bstate.subs ? ' on' : ''}" id="fSubs" type="button" aria-pressed="${bstate.subs}" onclick="LF._browse({subs:!LF._bs.subs})">
+          <svg class="ic"><use href="#i-cc"/></svg>Has Subtitles
+        </button>
+      </div>
+      <div class="grid" id="bGrid">${filtered.length ? filtered.map(card).join('') : '<div class="state" style="margin:40px auto"><svg class="ic"><use href="#i-search"/></svg><h2>No results</h2><p>Try different keywords or remove filters.</p></div>'}</div>
+    </div>`;
+    settleImages(main);
+    // Auto-focus the first card for TV remote users
+    if (!document.body.classList.contains('pointer')) {
+      const first = $('#bGrid .card', main);
+      if (first) setTimeout(() => first.focus({ preventScroll: true }), 80);
+    }
+  }
+  LF._browse = (p) => { bstate = Object.assign({}, bstate, p); LF._bs = bstate; if (page === 'browse') renderBrowse(); };
+  LF._bs = bstate;
+
+  /* ---- page rendering ---- */
+  let page = '';
+  function renderPage(kind, params) {
+    page = kind;
+    LF._bs = bstate;
+    $$('.tabs a').forEach((a) => a.classList.toggle('on', a.dataset.tab === kind));
+    if (kind === 'home') renderHome();
+    else if (kind === 'browse') {
+      const q = (params.q || new URLSearchParams()).get('q') || '';
+      const sort = (params.q || new URLSearchParams()).get('sort') || bstate.sort;
+      const dir = (params.q || new URLSearchParams()).get('dir') || bstate.dir;
+      bstate = { q, sort, dir, subs: bstate.subs };
+      LF._bs = bstate;
+      renderBrowse();
+    }
+  }
+
+  /* ---- movie detail ---- */
+  function showDetail(mid) {
+    const m = byId(mid);
+    if (!m) { LF.toast('Movie not found.'); location.replace('#/'); return; }
+    const html = `<div class="modal"><button class="m-close" type="button" aria-label="Close" onclick="LF.closeOverlay()"><svg class="ic"><use href="#i-close"/></svg></button>
+      <div class="det">
+        <div class="poster">${m.poster === 'ready' ? `<img data-p="1" alt="" src="/poster/${m.id}?v=${m.pv}">` : `<div class="ph"><b>${esc(m.title)}</b></div>`}</div>
+        <div>
+          <h2>${esc(m.title)}</h2>
+          <div class="meta">${m.year ? `<span>${m.year}</span><span class="dot"></span>` : ''}${m.genre ? `<span>${esc(m.genre)}</span><span class="dot"></span>` : ''}<span>${m.ext}</span>${m.dur ? `<span class="dot"></span><span>${LF.fmtTime(m.dur)}</span>` : ''}${m.subs ? `<span class="dot"></span><span>Subtitles</span>` : ''}</div>
+          <div class="ov" id="dOv" aria-live="polite">${m.overview ? esc(m.overview) : '<span style="color:var(--muted)">Loading details...</span>'}</div>
+          <dl class="facts">
+            <dt>Format</dt><dd>${m.ext}</dd>
+            <dt>Size</dt><dd>${m.size_str}</dd>
+            ${m.folder ? `<dt>Folder</dt><dd>${esc(m.folder)}</dd>` : ''}
+          </dl>
+          <div class="actions" style="margin-top:20px">
+            <a class="btn primary" href="#/watch/${m.id}" id="dPlay"><svg class="ic"><use href="#i-play"/></svg>Play</a>
+          </div>
+          <div id="dSubs" style="margin-top:16px;color:var(--muted);font-size:.93rem">${m.subs ? `${m.subs} subtitle file${m.subs > 1 ? 's' : ''} available` : ''}</div>
+        </div>
+      </div>
+    </div>`;
+    const modal = openModal(html, { onClose: () => { if (LF.fromPage) {} } });
+    settleImages(modal.el);
+    // Load full details async
+    LF.api('/api/movies/' + mid).then((d) => {
+      const ovEl = $('#dOv', modal.el);
+      if (ovEl) ovEl.textContent = d.overview || '';
+      const subEl = $('#dSubs', modal.el);
+      if (subEl) {
+        const n = (d.tracks || []).length + ((d.probe && d.probe.subs) ? d.probe.subs.length : 0);
+        subEl.textContent = n > 0 ? `${n} subtitle track${n > 1 ? 's' : ''} available` : '';
+      }
+      const factEl = modal.el.querySelector('.facts');
+      if (factEl && d.probe && d.probe.video) {
+        const v = d.probe.video;
+        const extra = document.createElement('dt'); extra.textContent = 'Resolution';
+        const extrav = document.createElement('dd'); extrav.textContent = v.h ? `${v.h}p` : `${v.w}x${v.h}`;
+        factEl.appendChild(extra); factEl.appendChild(extrav);
+      }
+    }).catch(() => {});
+  }
+
+  /* ---- settings ---- */
+  function showSettings() {
+    LF.api('/api/settings').then((s) => {
+      const html = `<div class="modal sm"><button class="m-close" type="button" aria-label="Close" onclick="LF.closeOverlay()"><svg class="ic"><use href="#i-close"/></svg></button>
+        <div class="m-body">
+          <h2>Settings</h2>
+          ${!s.can_edit ? '<div class="msg">Settings can only be changed from the computer running LocalFlix.</div>' : ''}
+          <div id="sMsg"></div>
+          <form id="sForm">
+            <div class="form-row"><label for="sMovies">Movies folder</label><input class="inp" id="sMovies" type="text" value="${esc(s.movies_dir)}" placeholder="C:\\Users\\You\\Videos\\Movies" ${!s.can_edit ? 'readonly' : ''}><small>Folder that contains your video files.</small></div>
+            <div class="form-row"><label for="sSubs">Subtitle folder</label><input class="inp" id="sSubs" type="text" value="${esc(s.subtitle_dir)}" placeholder="C:\\Users\\You\\Videos\\Movies\\subtitle" ${!s.can_edit ? 'readonly' : ''}><small>Folder that contains .srt / .ass / .vtt files. Auto-detected when placed in a "subtitle" subfolder inside your movies folder.</small></div>
+            ${s.can_edit ? '<div class="actions" style="margin-top:20px"><button class="btn primary" type="submit" id="sSave">Save &amp; Rescan</button></div>' : ''}
+          </form>
+        </div>
+      </div>`;
+      const modal = openModal(html);
+      const form = $('#sForm', modal.el); if (!form) return;
+      form.onsubmit = async (e) => {
+        e.preventDefault();
+        const msg = $('#sMsg', modal.el);
+        const btn = $('#sSave', modal.el); if (btn) btn.textContent = 'Saving…';
+        try {
+          await LF.api('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ movies_dir: $('#sMovies', modal.el).value.trim(), subtitle_dir: $('#sSubs', modal.el).value.trim() }) });
+          msg.innerHTML = '<div class="msg ok">Saved. Rescanning library...</div>';
+          await LF.load(); if (btn) btn.textContent = 'Save & Rescan';
+        } catch (err) {
+          msg.innerHTML = `<div class="msg err">${esc(err.message)}</div>`;
+          if (btn) btn.textContent = 'Save & Rescan';
+        }
+      };
+    });
+  }
+
+  /* ---- search / suggestions ---- */
+  let sel = -1, sugg_items = [];
+  const sq = () => $('#q'); const sg = () => $('#sugg');
+  function closeSugg() { sg().hidden = true; sq().setAttribute('aria-expanded', 'false'); sel = -1; }
+  function highlight(title, q) {
+    const w = q.toLowerCase().split(/\s+/).filter(Boolean);
+    let out = esc(title);
+    w.forEach((word) => { out = out.replace(new RegExp(word, 'gi'), '<mark>$&</mark>'); });
+    return out;
+  }
+  function pushRecent(q) {
+    if (!q || q.length < 2) return;
+    let r = store.get('lf.recent', []) || [];
+    r = [q, ...r.filter((x) => x !== q)].slice(0, 8);
+    store.set('lf.recent', r);
+  }
+  function renderSugg() {
+    const q = sq().value.trim();
+    const box = sg(); let html = ''; sugg_items = [];
+    if (!q) {
+      const recent = store.get('lf.recent', []) || [];
+      if (recent.length) {
+        html += `<div class="sg-h">Recent<button type="button" id="rClear" aria-label="Clear recent">Clear</button></div>`;
+        recent.forEach((r, i) => {
+          sugg_items.push({ type: 'search', q: r });
+          html += `<button class="sg" type="button" role="option" data-i="${sugg_items.length - 1}"><div class="sg-txt"><div class="sg-t">${esc(r)}</div></div></button>`;
+        });
+      }
+    } else {
+      const res = LF.searchMovies(q);
+      if (!res.length) {
+        html = `<div class="sg-empty">No titles match "${esc(q)}".</div>`;
+      } else {
+        res.slice(0, 6).forEach((m) => {
+          sugg_items.push({ type: 'm', id: m.id });
+          html += `<button class="sg" type="button" role="option" data-i="${sugg_items.length - 1}">
+            <div class="sg-p poster" style="aspect-ratio:auto;border-radius:5px;box-shadow:none;min-height:46px">${m.poster === 'ready' ? `<img data-p="1" alt="" src="/poster/${m.id}?v=${m.pv}" style="position:static;width:34px;height:50px;object-fit:cover">` : ''}</div>
+            <div class="sg-txt"><div class="sg-t">${highlight(m.title, q)}</div><div class="sg-m">${esc([m.year, m.ext, m.subs ? 'Subtitles' : ''].filter(Boolean).join('  ·  '))}</div></div>
+          </button>`;
+        });
+        sugg_items.push({ type: 'all', q });
+        html += `<button class="sg sg-all" type="button" role="option" data-i="${sugg_items.length - 1}">See all ${res.length} result${res.length > 1 ? 's' : ''}</button>`;
+      }
+    }
+    box.innerHTML = html; box.hidden = false; sq().setAttribute('aria-expanded', 'true'); sel = -1;
+    settleImages(box);
+  }
+  function pickSugg(i) {
+    const it = sugg_items[i]; if (!it) return;
+    if (it.type === 'm') { pushRecent(sq().value); closeSugg(); location.hash = '#/movie/' + it.id; }
+    else if (it.type === 'search') { sq().value = it.q; renderSugg(); }
+    else { sq().value = it.q; runSearch(true); }
+  }
+  function runSearch(go) {
+    const q = sq().value.trim(); closeSugg(); if (q) pushRecent(q);
+    if (go || page === 'browse') {
+      if (page !== 'browse' || location.hash.indexOf('#/browse') !== 0) { location.hash = '#/browse?q=' + encodeURIComponent(q) + '&sort=' + bstate.sort + '&dir=' + bstate.dir; }
+      else setBrowse({ q });
+    }
+  }
+  function setupSearch() {
+    const q = sq(); let t;
+    q.addEventListener('input', () => { $('#qclear').hidden = !q.value; renderSugg(); if (page === 'browse') { clearTimeout(t); t = setTimeout(() => { if (page === 'browse') setBrowse({ q: q.value.trim() }); }, 220); } });
+    q.addEventListener('focus', () => renderSugg());
+    q.addEventListener('keydown', (e) => {
+      const open = !sg().hidden;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (!open) renderSugg(); if (!sugg_items.length) return;
+        e.preventDefault(); e.stopPropagation();
+        sel = (sel + (e.key === 'ArrowDown' ? 1 : -1) + sugg_items.length) % sugg_items.length;
+        $$('.sg', sg()).forEach((b, i) => { b.setAttribute('aria-selected', i === sel); if (i === sel) b.scrollIntoView({ block: 'nearest' }); });
+      } else if (e.key === 'Enter') { e.preventDefault(); if (sel >= 0) pickSugg(sel); else runSearch(true); q.blur(); }
+      else if (e.key === 'Escape') {
+        if (open) { closeSugg(); e.stopPropagation(); } else if (q.value) { q.value = ''; $('#qclear').hidden = true; if (page === 'browse') setBrowse({ q: '' }); e.stopPropagation(); } else q.blur();
+      }
+    });
+    $('#qclear').addEventListener('click', () => { q.value = ''; $('#qclear').hidden = true; closeSugg(); if (page === 'browse') setBrowse({ q: '' }); q.focus(); });
+    sg().addEventListener('mousedown', (e) => e.preventDefault());
+    sg().addEventListener('click', (e) => {
+      if (e.target.closest('#rClear')) { store.set('lf.recent', []); closeSugg(); return; }
+      const b = e.target.closest('.sg'); if (b) pickSugg(+b.dataset.i);
+    });
+    document.addEventListener('mousedown', (e) => { if (!e.target.closest('#search')) closeSugg(); });
+    $('#btnSettings').addEventListener('click', () => { location.hash = '#/settings'; });
+  }
+
+  /* ---- focus nav (TV remote) ---- */
+  const FOCUSABLE = 'a[href],button:not([disabled]),input:not([type=hidden]):not([disabled]),select,[tabindex="0"]';
+  function visible(el) { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden' && !el.closest('[hidden]'); }
+  LF.moveFocus = function (dir, root) {
+    root = root || document;
+    const cur = document.activeElement;
+    const els = $$(FOCUSABLE, root).filter((e) => e !== cur && e.tabIndex !== -1 && visible(e));
+    if (!cur || cur === document.body || !root.contains(cur)) {
+      const first = els.find((e) => e.getBoundingClientRect().bottom > 80);
+      if (first) { first.focus(); return true; } return false;
+    }
+    const cr = cur.getBoundingClientRect(), cx = cr.left + cr.width / 2, cy = cr.top + cr.height / 2;
+    let best = null, bs = Infinity;
+    for (const el of els) {
+      const r = el.getBoundingClientRect(), ex = r.left + r.width / 2, ey = r.top + r.height / 2;
+      const dx = ex - cx, dy = ey - cy; let main, cross;
+      if (dir === 'right') { if (r.left < cr.right - cr.width / 2 && dx <= 4) continue; main = dx; cross = Math.abs(dy); }
+      else if (dir === 'left') { if (dx >= -4) continue; main = -dx; cross = Math.abs(dy); }
+      else if (dir === 'down') { if (dy <= 4) continue; main = dy; cross = Math.abs(dx); }
+      else { if (dy >= -4) continue; main = -dy; cross = Math.abs(dx); }
+      if (main <= 0) continue;
+      const overlap = (dir === 'left' || dir === 'right') ? !(r.bottom < cr.top || r.top > cr.bottom) : !(r.right < cr.left || r.left > cr.right);
+      const sc = main + cross * (overlap ? 1.2 : 4);
+      if (sc < bs) { bs = sc; best = el; }
+    }
+    if (best) { best.focus({ preventScroll: true }); best.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' }); return true; }
+    return false;
+  };
+  let pointerUsed = false;
+  document.addEventListener('mousemove', () => { pointerUsed = true; document.body.classList.add('pointer'); }, { passive: true });
+  const DIRS = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' };
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (LF.player && LF.player.active) { if (LF.player.onKey(e)) return; }
+    const tag = e.target.tagName, typing = (tag === 'INPUT' && !/range|checkbox|button/.test(e.target.type)) || tag === 'TEXTAREA';
+    if (e.key === 'Escape' || e.key === 'GoBack' || e.key === 'BrowserBack' || (e.key === 'Backspace' && !typing)) {
+      if (modalEl || /^\/(movie|watch|settings)/.test(location.hash.slice(2))) { e.preventDefault(); LF.closeOverlay(); return; }
+      if (e.key === 'Backspace' || e.key === 'Escape') return;
+    }
+    if (e.key === '/' && !typing && !modalEl) { e.preventDefault(); sq().focus(); sq().select(); return; }
+    const dir = DIRS[e.key]; if (!dir || typing || tag === 'SELECT') return;
+    if (e.target.getAttribute && e.target.getAttribute('role') === 'slider') return;
+    if (tag === 'INPUT' && e.target.type === 'range' && (dir === 'left' || dir === 'right')) return;
+    const root = modalEl || document;
+    if (document.activeElement === document.body && !LF.tv && pointerUsed && !modalEl) return;
+    e.preventDefault(); LF.moveFocus(dir, root);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Tab' && modalEl) {
+      const f = $$(FOCUSABLE, modalEl).filter(visible); if (!f.length) return;
+      if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f[f.length - 1].focus(); }
+      else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
+    }
+  });
+
+  /* ---- routing ---- */
+  LF.load = async function (render) {
+    try {
+      const [movies, info] = await Promise.all([LF.api('/api/movies'), LF.api('/api/info')]);
+      LF.movies = prep(movies); LF.info = info; LF.offline = false;
+    } catch (err) {
+      LF.offline = true;
+      if (!LF.movies) { LF.movies = []; $('#main').innerHTML = errorState(err.message); return false; }
+    }
+    if (render !== false) route(true);
+    return true;
+  };
+  let pollTimer, polls = 0;
+  async function tick() {
+    const delay = LF.info && LF.info.poster_pending > 0 && polls < 60 ? 3500 : 45000;
+    pollTimer = setTimeout(async () => {
+      polls++;
+      try {
+        const sig = (before) => LF.movies.map((m) => m.id + ':' + m.pv).join('|');
+        const before = sig(); const old = new Map(LF.movies.map((m) => [m.id, m.pv]));
+        const [movies, info] = await Promise.all([LF.api('/api/movies'), LF.api('/api/info')]);
+        LF.movies = prep(movies); LF.info = info;
+        if (sig() !== before && !modalEl && !(LF.player && LF.player.active) && document.activeElement !== sq()) route(true);
+        else LF.movies.forEach((m) => {
+          if (old.get(m.id) === m.pv) return;
+          document.querySelectorAll(`.poster[data-id="${m.id}"]`).forEach((p) => {
+            const img = p.querySelector('img[data-p]'); if (img) img.remove();
+            const ph = p.querySelector('.ph'); if (ph) ph.classList.remove('shim');
+            if (m.poster === 'ready') { const ni = document.createElement('img'); ni.dataset.p = '1'; ni.alt = ''; ni.src = `/poster/${m.id}?v=${m.pv}`; ni.addEventListener('load', () => ni.classList.add('ld')); p.insertBefore(ni, p.firstChild); }
+          });
+        });
+      } catch { /* offline */ }
+      tick();
+    }, delay);
+  }
+
+  function route(force) {
+    const h = location.hash.replace(/^#/, '') || '/';
+    const qi = h.indexOf('?'), path = qi < 0 ? h : h.slice(0, qi), qs = new URLSearchParams(qi < 0 ? '' : h.slice(qi + 1));
+    const parts = path.split('/').filter(Boolean), k = parts[0] || 'home';
+    const overlay = k === 'movie' || k === 'watch' || k === 'settings';
+    if (!overlay) {
+      closeModal();
+      if (LF.player && LF.player.active) LF.player.close(true);
+      const kind = k === 'browse' ? 'browse' : 'home';
+      if (force || kind !== page || (kind === 'browse' && h !== LF.pageHash)) renderPage(kind, { q: qs });
+      LF.pageHash = h; LF.wasOverlay = false; return;
+    }
+    if (!page) renderPage('home', { q: new URLSearchParams() });
+    if (!LF.wasOverlay) LF.fromPage = !!LF.routed;
+    LF.wasOverlay = true;
+    if (k === 'watch') {
+      closeModal(true);
+      const m = byId(parts[1]);
+      if (!m) { LF.toast('That movie is no longer in the library.'); location.replace('#/'); return; }
+      LF.player.open(m, { startAt: qs.has('t') ? parseFloat(qs.get('t')) : null });
+    } else {
+      if (LF.player && LF.player.active) LF.player.close(true);
+      if (k === 'movie') showDetail(parts[1]); else showSettings();
+    }
+  }
+
+  LF.start = async function () {
+    setupSearch();
+    $('#main').innerHTML = '<div class="page"><div class="grid" style="margin-top:40px">' + '<div class="skel"></div>'.repeat(12) + '</div></div>';
+    window.addEventListener('hashchange', () => { LF.routed = true; route(); });
+    const ok = await LF.load(false);
+    if (ok) { route(true); LF.routed = true; tick(); }
+  };
+})();

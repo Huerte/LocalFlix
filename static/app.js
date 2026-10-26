@@ -323,8 +323,8 @@
     const info = LF.info || {};
     const heroMeta = posters.infoCache ? posters.infoCache[hero.id] : {};
     let rowSeq = 0;
-    // Rows stay short on purpose: a few cards, then a last "See more" card that opens Browse already filtered.
-    const ROW_LIMIT = 7;
+    // Rows stay short on purpose: 12 cards, then a last "See more" card that opens Browse already filtered.
+    const ROW_LIMIT = 12;
     function moreCard(title, rest, href) {
       return `<a class="card card-more" href="${href}" aria-label="See more in ${esc(title)}, ${rest} more">
         <div class="poster"><div class="more-in"><svg class="ic"><use href="#i-chev"/></svg><b>See more</b><small>${rest} more</small></div></div>
@@ -378,7 +378,6 @@
           </div>
         </div>
       </div>
-      ${rowHtml('Continue Watching', LF.progress.resumable().filter((id) => id !== hero.id).map(byId).filter(Boolean), 12)}
       ${rowHtml('Recently Added', addedSort, ROW_LIMIT, '#/browse?cat=&sort=added&dir=desc')}
       ${catRows}${catMore}
     </div>`;
@@ -555,7 +554,7 @@
     if (!m) { LF.toast('Movie not found.'); location.replace('#/'); return; }
     const html = `<div class="modal"><button class="m-close" type="button" aria-label="Close" onclick="LF.closeOverlay()"><svg class="ic"><use href="#i-close"/></svg></button>
       <div class="det">
-        <div class="poster">${m.poster === 'ready' ? `<img data-p="1" alt="" decoding="async" src="${posterUrl(m, 420)}">` : `<div class="ph"><b>${esc(m.title)}</b></div>`}</div>
+        <div class="poster">${m.poster === 'ready' ? `<img data-p="1" alt="" decoding="async" src="${posterUrl(m, 420)}">` : `<div class="ph shim"></div>`}</div>
         <div>
           <h2>${esc(m.title)}</h2>
           <div class="meta">${m.year ? `<span>${m.year}</span><span class="dot"></span>` : ''}${m.genre ? `<span>${esc(m.genre)}</span><span class="dot"></span>` : ''}<span>${m.ext}</span>${m.dur ? `<span class="dot"></span><span>${LF.fmtTime(m.dur)}</span>` : ''}${m.subs ? `<span class="dot"></span><span>Subtitles</span>` : ''}</div>
@@ -1146,6 +1145,16 @@
     }, delay);
   }
 
+  // Open a freshly rendered page at its top, in the browser and in the TV app (where scrolling is animated by us).
+  function pageToTop() {
+    const doc = document.scrollingElement || document.documentElement;
+    for (let i = anims.length - 1; i >= 0; i--) if (anims[i].el === doc) anims.splice(i, 1);
+    const go = () => { doc.scrollTop = 0; window.scrollTo(0, 0); };
+    go();
+    requestAnimationFrame(go);
+    setTimeout(go, 120);      // after the TV's delayed focus on the first card
+  }
+
   function route(force) {
     const h = location.hash.replace(/^#/, '') || '/';
     const qi = h.indexOf('?'), path = qi < 0 ? h : h.slice(0, qi), qs = new URLSearchParams(qi < 0 ? '' : h.slice(qi + 1));
@@ -1155,7 +1164,11 @@
       closeModal();
       if (LF.player && LF.player.active) LF.player.close(true);
       const kind = k === 'browse' ? 'browse' : 'home';
-      if (force || kind !== page || (kind === 'browse' && h !== LF.pageHash)) renderPage(kind, { q: qs });
+      if (force || kind !== page || (kind === 'browse' && h !== LF.pageHash)) {
+        const fresh = !force && (kind !== page || LF.pageHash !== h);
+        renderPage(kind, { q: qs });
+        if (fresh) pageToTop();      // a new page (e.g. See more -> filtered Browse) always opens at the top
+      }
       LF.pageHash = h; LF.wasOverlay = false; return;
     }
     if (!page) renderPage('home', { q: new URLSearchParams() });

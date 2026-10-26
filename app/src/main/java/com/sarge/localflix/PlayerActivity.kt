@@ -3,6 +3,10 @@ package com.sarge.localflix
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
+import android.text.SpannableStringBuilder
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
+import android.text.style.RelativeSizeSpan
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -41,6 +45,7 @@ import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.SubtitleView
 import com.sarge.localflix.databinding.ActivityPlayerBinding
@@ -104,6 +109,10 @@ class PlayerActivity : FragmentActivity() {
     private var cuesFor = -2
     private var cueJob: Job? = null
     private var subSizePct = 100           // subtitle size in percent (Settings menu)
+    private var subPosPct = 8              // distance of the subtitles from the bottom edge, in % of the screen height
+    private var subColor = Color.WHITE
+    private var subBg = "outline"          // outline | box | none
+    private var fitMode = "contain"        // contain (fit to screen) | cover (fill, crop edges)
     private var subOffsetMs = 0L           // subtitle sync: + = subtitles appear later, - = earlier (remembered per movie)
 
     // ── playback speed ────────────────────────────────────────────────────────
@@ -141,6 +150,11 @@ class PlayerActivity : FragmentActivity() {
 
         speed = prefs.getFloat(KEY_SPEED, 1f)
         subSizePct = prefs.getInt(KEY_SUB_SIZE, 100)
+        subPosPct = prefs.getInt(KEY_SUB_POS, 8)
+        subColor = prefs.getInt(KEY_SUB_COLOR, Color.WHITE)
+        subBg = prefs.getString(KEY_SUB_BG, "outline") ?: "outline"
+        fitMode = prefs.getString(KEY_FIT, "contain") ?: "contain"
+        b.playerView.resizeMode = if (fitMode == "cover") AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
         subOffsetMs = prefs.getLong(KEY_SUB_OFFSET + req.id, 0L)
 
         // Same title block as the web player: title, then "year · 1080p · MKV".
@@ -682,65 +696,206 @@ class PlayerActivity : FragmentActivity() {
     // ── menus (subtitles / audio) ─────────────────────────────────────────────
 
     /** [keep] = the pick opens another screen inside the same panel, so the panel must not be closed first. */
-    private class MenuEntry(val label: String, val checked: Boolean, val keep: Boolean = false, val header: Boolean = false, val onPick: () -> Unit)
+    private class MenuEntry(val label: String, val checked: Boolean, val keep: Boolean = false, val header: Boolean = false,
+                            val sub: String = "", val tail: Boolean = false, val onPick: () -> Unit)
 
     private fun openSubtitleMenu() {
         val items = ArrayList<MenuEntry>()
         items.add(MenuEntry("Off", subChoice < 0) { selectSubtitle(-1) })
         subs.forEachIndexed { i, s -> items.add(MenuEntry(s.label, subChoice == i) { selectSubtitle(i) }) }
-        items.add(MenuEntry("Browse subtitle files...", false, keep = true) { openSubtitleBrowser() })
-        // Everything that adjusts how subtitles look or line up lives here, not in the Playback menu.
-        items.add(MenuEntry("Subtitle settings", false, header = true) {})
-        items.add(MenuEntry("Sync:  " + offsetText(subOffsetMs), false, keep = true) { openSyncMenu(b.bSubs) { openSubtitleMenu() } })
-        items.add(MenuEntry("Size:  " + subSizeName(), false, keep = true) { openSubtitleSizeMenu() })
+        items.add(MenuEntry("Add subtitles", false, header = true) {})
+        items.add(MenuEntry("Browse subtitle files", false, keep = true, tail = true) { openSubtitleBrowser() })
+        items.add(MenuEntry("Customize", false, header = true) {})
+        items.add(MenuEntry("Appearance and timing", false, keep = true, tail = true,
+            sub = "Size $subSizePct%  ·  Delay " + offsetText(subOffsetMs)) { openAppearanceMenu() })
+        items.add(MenuEntry("Subtitle sync", false, keep = true, tail = true,
+            sub = if (subOffsetMs == 0L) "No offset" else offsetText(subOffsetMs)) { openSyncMenu(b.bSubs) { openSubtitleMenu() } })
         openMenu("Subtitles", items, b.bSubs)
     }
 
-    private val sizeChoices = listOf("Small" to 80, "Normal" to 100, "Large" to 130, "Huge" to 170)
-    private fun subSizeName() = sizeChoices.firstOrNull { it.second == subSizePct }?.first ?: "$subSizePct%"
+    // ── press-and-hold buttons (+ / -) ─────────────────────────────────────────
 
-    /** Subtitle size. The change shows on screen at once; Back returns to the Subtitles list. */
-    private fun openSubtitleSizeMenu() {
-        val items = ArrayList<MenuEntry>()
-        for ((label, pct) in sizeChoices) {
-            items.add(MenuEntry(label, subSizePct == pct, keep = true) {
-                subSizePct = pct
-                prefs.edit().putInt(KEY_SUB_SIZE, pct).apply()
-                applySubtitleLook()
-                openSubtitleSizeMenu()
-            })
+    /** What a + / - button does: [step] once per tick, [end] when the key is released (save). */
+    private class Hold(val step: (Int) -> Unit, val end: () -> Unit, val interval: Long)
+    private class HoldKey(val dir: Int, val hold: Hold)
+
+    private val holdables = HashMap<View, HoldKey>()   // focusable + / - buttons of the open panel
+    private var holdDir = 0
+    private var holdCur: Hold? = null
+    private var onOffsetUi: (() -> Unit)? = null        // the open panel shows the delay: refresh it
+    private var onStyleUi: (() -> Unit)? = null         // the open panel shows size / position / colour: refresh it
+
+    private val delayHold = Hold({ d -> applyOffset(subOffsetMs + d * 100L) }, { commitOffset() }, 70)
+    private val sizeHold = Hold({ d -> subSizePct = (subSizePct + d * 10).coerceIn(50, 250); applySubtitleLook(); onStyleUi?.invoke() }, { saveLook() }, 130)
+    private val posHold = Hold({ d -> subPosPct = (subPosPct + d * 2).coerceIn(2, 40); applySubtitleLook(); onStyleUi?.invoke() }, { saveLook() }, 130)
+
+    /**
+     * Pressing OK once moves one step; HOLDING OK keeps stepping until the key is released (the stepping is driven
+     * by our own timer, not by the remote's key-repeat, which differs from TV to TV). The value is saved on release.
+     */
+    private val holdTick = object : Runnable {
+        override fun run() {
+            val h = holdCur ?: return
+            h.step(holdDir)
+            ui.postDelayed(this, h.interval)
         }
-        openMenu("Subtitle size", items, b.bSubs)
+    }
+
+    private fun startHold(h: Hold, dir: Int) {
+        stopHold()
+        holdCur = h
+        holdDir = dir
+        h.step(dir)                                   // first press = exactly one step
+        ui.postDelayed(holdTick, 400)                 // then, if still held, keep going
+    }
+
+    private fun stopHold() {
+        val h = holdCur ?: return
+        holdCur = null
+        holdDir = 0
+        ui.removeCallbacks(holdTick)
+        h.end()
+    }
+
+    // ── subtitle appearance: size / position / delay / colour / background ──────
+
+    private val subColors = listOf(0xFFFFFFFF.toInt() to "White", 0xFFFFE14D.toInt() to "Yellow", 0xFF66E0FF.toInt() to "Cyan", 0xFF7DFF9B.toInt() to "Green")
+    private val subBgs = listOf("outline" to "Outline only", "box" to "Dark box", "none" to "None")
+
+    private fun saveLook() {
+        prefs.edit().putInt(KEY_SUB_SIZE, subSizePct).putInt(KEY_SUB_POS, subPosPct)
+            .putInt(KEY_SUB_COLOR, subColor).putString(KEY_SUB_BG, subBg).apply()
+    }
+
+    private fun stepBtn(text: String, dir: Int, hold: Hold): Button = Button(this).apply {
+        this.text = text
+        isAllCaps = false
+        gravity = Gravity.CENTER
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 24f)
+        setTextColor(Color.WHITE)
+        setBackgroundResource(R.drawable.bg_step)
+        stateListAnimator = null
+        minWidth = 0; minHeight = 0; minimumWidth = dp(56); minimumHeight = dp(48)
+        setPadding(0, 0, 0, 0)
+        setOnClickListener { hold.step(dir); hold.end() }          // touch / mouse; the remote is handled in dispatchKeyEvent
+        holdables[this] = HoldKey(dir, hold)
+    }
+
+    /** "Label      [-]  value  [+]". Returns the [-] button. The value text is refreshed through [refresh]. */
+    private fun addStepper(label: String, hold: Hold, value: () -> String, refresh: MutableList<() -> Unit>): Button {
+        val valueView = TextView(this).apply {
+            gravity = Gravity.CENTER
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+            setTextColor(Color.WHITE)
+            minWidth = dp(84)
+            text = value()
+        }
+        val minus = stepBtn("-", -1, hold)
+        val plus = stepBtn("+", 1, hold)
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(10), dp(3), dp(2), dp(3)) }
+        row.addView(TextView(this).apply { text = label; setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f); setTextColor(Color.WHITE) },
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(minus, LinearLayout.LayoutParams(dp(56), dp(48)))
+        row.addView(valueView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        row.addView(plus, LinearLayout.LayoutParams(dp(56), dp(48)))
+        b.menuList.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(4) })
+        refresh.add { valueView.text = value() }
+        return minus
+    }
+
+    private fun swatchBackground(color: Int): android.graphics.drawable.Drawable {
+        fun oval(stroke: Int?) = android.graphics.drawable.GradientDrawable().apply {
+            shape = android.graphics.drawable.GradientDrawable.OVAL
+            setColor(color)
+            if (stroke != null) setStroke(dp(3), stroke)
+        }
+        return android.graphics.drawable.StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_focused), oval(Color.WHITE))
+            addState(intArrayOf(android.R.attr.state_selected), oval(0xFFE50914.toInt()))
+            addState(intArrayOf(), oval(null))
+        }
+    }
+
+    /** Same screen as the web player's "Appearance and timing". Everything updates in place so the focus never jumps. */
+    private fun openAppearanceMenu() {
+        beginMenu("Appearance and timing", b.bSubs)
         menuBackTo = { openSubtitleMenu() }
+        val refresh = ArrayList<() -> Unit>()
+        val all = { refresh.forEach { it() } }
+        onStyleUi = all
+        onOffsetUi = all
+
+        val first = addStepper("Size", sizeHold, { "$subSizePct%" }, refresh)
+        addStepper("Position", posHold, { "$subPosPct%" }, refresh)
+        addStepper("Delay", delayHold, { offsetText(subOffsetMs) }, refresh)
+
+        // Colour
+        val swRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(10), dp(6), dp(8), dp(6)) }
+        swRow.addView(TextView(this).apply { text = "Color"; setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f); setTextColor(Color.WHITE) },
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        val swatches = ArrayList<Pair<Int, View>>()
+        for ((c, name) in subColors) {
+            val v = View(this).apply {
+                contentDescription = name
+                isFocusable = true
+                isClickable = true
+                background = swatchBackground(c)
+                isSelected = subColor == c
+                setOnClickListener { subColor = c; saveLook(); applySubtitleLook(); all() }
+            }
+            swatches.add(c to v)
+            swRow.addView(v, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginStart = dp(10) })
+        }
+        refresh.add { swatches.forEach { (c, v) -> v.isSelected = subColor == c } }
+        b.menuList.addView(swRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(4) })
+
+        // Background
+        b.menuList.addView(TextView(this).apply {
+            text = "BACKGROUND"; textSize = 13f; letterSpacing = 0.08f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setTextColor(ContextCompat.getColor(this@PlayerActivity, R.color.muted))
+            setPadding(dp(10), dp(12), dp(8), dp(6))
+        })
+        for ((key, label) in subBgs) {
+            val btn = menuButton(label, subBg == key, withCheck = true).apply {
+                setOnClickListener { subBg = key; saveLook(); applySubtitleLook(); all() }
+            }
+            refresh.add { applyCheck(btn, subBg == key) }
+            b.menuList.addView(btn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(4) })
+        }
+        val reset = menuButton("Reset to defaults", false, withCheck = true).apply {
+            setOnClickListener {
+                subSizePct = 100; subPosPct = 8; subColor = Color.WHITE; subBg = "outline"
+                saveLook(); applyOffset(0); commitOffset(); applySubtitleLook(); all()
+            }
+        }
+        b.menuList.addView(reset, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        if (subChoice < 0) showMsg("Turn a subtitle on to see the change.")
+        showMenu(first)
     }
 
     // ── subtitle sync panel: [+] value [-] ─────────────────────────────────────
 
-    private var syncOn = false
-    private var syncPlus: Button? = null
-    private var syncMinus: Button? = null
     private var syncValue: TextView? = null
     private var syncHint: TextView? = null
-    private var holdDir = 0
 
     /**
      * Two big buttons, + (subtitles later) above and - (subtitles earlier) below, 0.1 s per step. Pressing OK once
-     * moves one step; HOLDING OK keeps stepping until the key is released. The stepping is driven by our own timer
-     * (not by the remote's key-repeat, which differs from TV to TV), and while it runs only a text label and the
+     * moves one step; HOLDING OK keeps stepping until the key is released. While it runs only a text label and the
      * subtitle line are updated, so it stays smooth. The value is saved when the key is released.
      */
     private fun openSyncMenu(opener: View, back: () -> Unit) {
         loadCuesIfNeeded(true)          // fetch the lines now so the first step shows up at once
         beginMenu("Subtitle sync", opener)
         menuBackTo = back
-        syncOn = true
         val lp = { LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(4) } }
 
         fun stepButton(label: String, dir: Int) = menuButton(label, false).apply {
             gravity = Gravity.CENTER
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
             minimumHeight = dp(60)
-            setOnClickListener { applyOffset(subOffsetMs + dir * 100L); commitOffset() }   // touch / mouse; the remote is handled in dispatchKeyEvent
+            setOnClickListener { delayHold.step(dir); delayHold.end() }   // touch / mouse; the remote is handled in dispatchKeyEvent
+            holdables[this] = HoldKey(dir, delayHold)
         }
         val plus = stepButton("+  0.1s   (subtitles later)", 1)
         val minus = stepButton("-  0.1s   (subtitles earlier)", -1)
@@ -761,13 +916,14 @@ class PlayerActivity : FragmentActivity() {
         b.menuList.addView(hint, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(8) })
         b.menuList.addView(minus, lp())
         b.menuList.addView(reset, lp())
-        syncPlus = plus; syncMinus = minus; syncValue = value; syncHint = hint
+        syncValue = value; syncHint = hint
         updateSyncUi()
         if (subChoice < 0) showMsg("Turn a subtitle on to see the change.")
         showMenu(plus)
     }
 
     private fun updateSyncUi() {
+        onOffsetUi?.invoke()
         val v = syncValue ?: return
         v.text = offsetText(subOffsetMs)
         v.setTextColor(when {
@@ -780,28 +936,6 @@ class PlayerActivity : FragmentActivity() {
             subOffsetMs > 0 -> "Subtitles appear later.  Hold OK to keep going."
             else -> "Subtitles appear earlier.  Hold OK to keep going."
         }
-    }
-
-    private val holdTick = object : Runnable {
-        override fun run() {
-            if (holdDir == 0) return
-            applyOffset(subOffsetMs + holdDir * 100L)
-            ui.postDelayed(this, 70)             // ~14 steps a second
-        }
-    }
-
-    private fun startHold(dir: Int) {
-        stopHold()
-        holdDir = dir
-        applyOffset(subOffsetMs + dir * 100L)    // first press = exactly one step
-        ui.postDelayed(holdTick, 400)            // then, if still held, keep going
-    }
-
-    private fun stopHold() {
-        if (holdDir == 0) return
-        holdDir = 0
-        ui.removeCallbacks(holdTick)
-        commitOffset()
     }
 
     // ── subtitle file browser (files in the server's subtitle folder) ─────────
@@ -925,26 +1059,37 @@ class PlayerActivity : FragmentActivity() {
         openMenu("Audio", items, b.bAudio)
     }
 
-    /** The web player's "Playback settings": speed and subtitle size. */
-    private fun openSettingsMenu() {
+    /** The web player's "Playback": speed and picture. The panel stays open so the change can be seen. */
+    private fun openSettingsMenu(focus: String? = null) {
         val items = ArrayList<MenuEntry>()
+        items.add(MenuEntry("Speed", false, header = true) {})
         for (x in floatArrayOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)) {
-            val name = if (x == 1f) "Speed:  Normal" else "Speed:  ${x}x"
-            items.add(MenuEntry(name, speed == x) {
+            val name = if (x == 1f) "Normal" else if (x % 1f == 0f) "${x.toInt()}x" else "${x}x"
+            items.add(MenuEntry(name, speed == x, keep = true) {
                 speed = x
                 prefs.edit().putFloat(KEY_SPEED, x).apply()
                 player?.setPlaybackSpeed(x)
-                showMsg(if (x == 1f) "Normal speed" else "Speed ${x}x")
+                openSettingsMenu(name)
             })
         }
-        openMenu("Playback", items, b.bSet)
+        items.add(MenuEntry("Picture", false, header = true) {})
+        items.add(MenuEntry("Fit to screen", fitMode != "cover", keep = true) { setFit("contain"); openSettingsMenu("Fit to screen") })
+        items.add(MenuEntry("Fill screen (crop edges)", fitMode == "cover", keep = true) { setFit("cover"); openSettingsMenu("Fill screen (crop edges)") })
+        openMenu("Playback", items, b.bSet, focus ?: items.firstOrNull { !it.header && it.checked }?.label)
+    }
+
+    private fun setFit(mode: String) {
+        fitMode = mode
+        prefs.edit().putString(KEY_FIT, mode).apply()
+        b.playerView.resizeMode = if (mode == "cover") AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
     }
 
     private fun channelsText(ch: Int) = when { ch <= 0 -> ""; ch == 1 -> "Mono"; ch == 2 -> "Stereo"; ch == 6 -> "5.1"; ch == 8 -> "7.1"; else -> "$ch ch" }
 
-    private var menuBackTo: (() -> Unit)? = null     // Back inside a sub screen (sync, file browser) returns here
+    private var menuBackTo: (() -> Unit)? = null     // Back inside a sub screen (appearance, sync, file browser) returns here
 
-    private fun menuButton(text: String, checked: Boolean): Button = Button(this).apply {
+    /** [withCheck] = row of a choice list: a red tick column on the left (blank when not chosen) so labels line up. */
+    private fun menuButton(text: CharSequence, checked: Boolean, withCheck: Boolean = false): Button = Button(this).apply {
         this.text = text
         isAllCaps = false
         gravity = Gravity.START or Gravity.CENTER_VERTICAL
@@ -953,13 +1098,21 @@ class PlayerActivity : FragmentActivity() {
         setBackgroundResource(R.drawable.bg_menu_item)
         stateListAnimator = null
         minimumHeight = dp(50)
-        setPadding(dp(14), 0, dp(14), 0)
+        setPadding(dp(14), dp(4), dp(14), dp(4))
+        if (withCheck) applyCheck(this, checked)
+    }
+
+    private fun applyCheck(btn: Button, on: Boolean) {
+        btn.setCompoundDrawablesRelativeWithIntrinsicBounds(if (on) R.drawable.ic_check_red else R.drawable.ic_check_blank, 0, 0, 0)
+        btn.compoundDrawablePadding = dp(16)
+        btn.setTextColor(if (on) ContextCompat.getColor(this, R.color.white) else 0xCCFFFFFF.toInt())
     }
 
     /** Clears the panel for new content. Used by every screen inside it. */
     private fun beginMenu(title: String, opener: View) {
         stopHold()
-        syncOn = false
+        holdables.clear()
+        onStyleUi = null; onOffsetUi = null; syncValue = null; syncHint = null
         browseJob?.cancel()
         menuBackTo = null
         menuOpener = opener
@@ -975,9 +1128,9 @@ class PlayerActivity : FragmentActivity() {
         focus?.requestFocus()
     }
 
-    private fun openMenu(title: String, items: List<MenuEntry>, opener: View) {
+    private fun openMenu(title: String, items: List<MenuEntry>, opener: View, focusLabel: String? = null) {
         beginMenu(title, opener)
-        var focusTarget: View? = null
+        var firstBtn: View? = null; var checkedBtn: View? = null; var labelBtn: View? = null
         if (items.isEmpty()) b.menuList.addView(menuNote("Nothing to choose from."))
         for (e in items) {
             if (e.header) {      // a section title: not focusable
@@ -985,22 +1138,33 @@ class PlayerActivity : FragmentActivity() {
                     text = e.label.uppercase(Locale.getDefault()); textSize = 13f; letterSpacing = 0.08f
                     setTypeface(typeface, android.graphics.Typeface.BOLD)
                     setTextColor(ContextCompat.getColor(this@PlayerActivity, R.color.muted))
-                    setPadding(dp(8), dp(14), dp(8), dp(6))
+                    setPadding(dp(10), dp(12), dp(8), dp(6))
                 })
                 continue
             }
-            val btn = menuButton((if (e.checked) "✓    " else "       ") + e.label, e.checked).apply {
+            val label: CharSequence = if (e.sub.isNotEmpty()) SpannableStringBuilder(e.label).apply {
+                append("\n")
+                val st = length
+                append(e.sub)
+                setSpan(RelativeSizeSpan(0.8f), st, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                setSpan(ForegroundColorSpan(ContextCompat.getColor(this@PlayerActivity, R.color.muted)), st, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            } else e.label
+            val btn = menuButton(label, e.checked, withCheck = true).apply {
                 setOnClickListener { if (!e.keep) closeMenu(); e.onPick() }
             }
+            if (e.tail) btn.setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_check_blank, 0, R.drawable.ic_chev_right, 0)
             b.menuList.addView(btn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(4) })
-            if (e.checked || focusTarget == null) focusTarget = btn   // focus the current choice, else the first row
+            if (firstBtn == null) firstBtn = btn
+            if (e.checked) checkedBtn = btn
+            if (focusLabel != null && e.label == focusLabel) labelBtn = btn
         }
-        showMenu(focusTarget)
+        showMenu(labelBtn ?: checkedBtn ?: firstBtn)    // the asked-for row, else the current choice, else the first row
     }
 
     private fun closeMenu() {
         stopHold()
-        syncOn = false
+        holdables.clear()
+        onStyleUi = null; onOffsetUi = null
         browseJob?.cancel()
         menuBackTo = null
         browseSearchRun?.let { ui.removeCallbacks(it) }
@@ -1090,15 +1254,29 @@ class PlayerActivity : FragmentActivity() {
 
     // ── subtitle look / position ──────────────────────────────────────────────
 
-    /** Size from the Settings menu; the lines move up while the controls are on screen (like the web player). */
+    /** Size, position, colour and background chosen in "Appearance and timing"; the lines move up while the controls show. */
     private fun applySubtitleLook() {
         val f = subSizePct / 100f
+        val bgColor = if (subBg == "box") 0xB3000000.toInt() else Color.TRANSPARENT
+        val edge = if (subBg == "outline") CaptionStyleCompat.EDGE_TYPE_OUTLINE else CaptionStyleCompat.EDGE_TYPE_NONE
         b.playerView.subtitleView?.apply {
+            setStyle(CaptionStyleCompat(subColor, bgColor, Color.TRANSPARENT, edge, Color.BLACK, null))
             setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * 1.15f * f)
-            setBottomPaddingFraction(if (controlsOn) 0.24f else 0.08f)
+            setBottomPaddingFraction(subPosPct / 100f + if (controlsOn) 0.16f else 0f)
         }
-        b.subText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 26f * f)
-        b.subText.translationY = if (controlsOn) -dp(120).toFloat() else 0f
+        // Converted-stream subtitles (drawn by us) follow the same look.
+        b.subText.apply {
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 26f * f)
+            setTextColor(subColor)
+            setShadowLayer(if (subBg == "outline") 6f else 0f, 0f, 0f, Color.BLACK)
+            background = if (subBg == "box") android.graphics.drawable.GradientDrawable().apply { setColor(bgColor); cornerRadius = dp(6).toFloat() } else null
+            setPadding(dp(10), dp(2), dp(10), dp(2))
+            (layoutParams as? android.widget.FrameLayout.LayoutParams)?.let {
+                it.bottomMargin = resources.displayMetrics.heightPixels * subPosPct / 100
+                layoutParams = it
+            }
+            translationY = if (controlsOn) -dp(120).toFloat() else 0f
+        }
     }
 
     /** Runs 4x a second: seek bar, time text, converted-stream subtitles. */
@@ -1158,12 +1336,12 @@ class PlayerActivity : FragmentActivity() {
             KeyEvent.KEYCODE_MEDIA_STOP -> { if (down) finishWithResult(null); return true }
         }
 
-        // Subtitle sync panel: holding OK on + / - keeps stepping until the key is released.
-        if (syncOn && menuOn) {
+        // Panels with + / - buttons (subtitle delay, size, position): holding OK keeps stepping until the key is released.
+        if (menuOn) {
             val okKey = k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER || k == KeyEvent.KEYCODE_NUMPAD_ENTER || k == KeyEvent.KEYCODE_BUTTON_A
-            val f = currentFocus
-            if (okKey && (f === syncPlus || f === syncMinus)) {
-                if (down) { if (e.repeatCount == 0) startHold(if (f === syncPlus) 1 else -1) }   // key-repeat events are ignored: our timer does the repeating
+            val hk = currentFocus?.let { holdables[it] }
+            if (okKey && hk != null) {
+                if (down) { if (e.repeatCount == 0) startHold(hk.hold, hk.dir) }   // key-repeat events are ignored: our timer does the repeating
                 else stopHold()
                 return true
             }
@@ -1242,6 +1420,10 @@ class PlayerActivity : FragmentActivity() {
         private const val KEY_SUB_LABEL = "sub_label"
         private const val KEY_SPEED = "speed"
         private const val KEY_SUB_SIZE = "sub_size"
+        private const val KEY_SUB_POS = "sub_pos"
+        private const val KEY_SUB_COLOR = "sub_color"
+        private const val KEY_SUB_BG = "sub_bg"
+        private const val KEY_FIT = "fit_mode"
         private const val KEY_SUB_OFFSET = "sub_offset_"
     }
 }

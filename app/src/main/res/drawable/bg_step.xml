@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Square - / + button of the subtitle appearance rows: grey, white ring when focused. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#40FFFFFF" />
+            <stroke android:width="3dp" android:color="@color/white" />
+            <corners android:radius="10dp" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#FF252936" />
+            <corners android:radius="10dp" />
+        </shape>
+    </item>
+</selector>

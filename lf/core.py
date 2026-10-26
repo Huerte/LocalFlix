@@ -9,7 +9,7 @@ import threading
 import time
 import unicodedata
 
-VERSION = "2.0.0"
+VERSION = "2.0.1"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 VIDEO_EXTS = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".mpg", ".mpeg", ".ts", ".3gp", ".ogv"}

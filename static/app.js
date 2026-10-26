@@ -1004,7 +1004,7 @@
   // Remember the card the user was on so focus can return there after a modal or the native player closes.
   document.addEventListener('focusin', (e) => {
     const c = e.target.closest && e.target.closest('.card');
-    if (c) { LF.lastCardEl = c; LF.lastCardId = c.dataset.id; }
+    if (c && c.dataset.id) { LF.lastCardEl = c; LF.lastCardId = c.dataset.id; }   // the "See more" card has no movie id
   });
   LF.restoreFocus = function () {
     const a = document.activeElement;

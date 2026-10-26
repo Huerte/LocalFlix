@@ -140,10 +140,80 @@ Prefer to manage sleep yourself? Set `"keep_awake": false` in `tv_monitor.json`,
 | Task shows "Running" but the TV is off | It ends about a minute after the TV leaves the network. If it stays `Running`, run `py tv_monitor.py --check`: `TV ... FOUND` means the TV still answers on the network (many TVs do in standby). |
 | Task is `Ready` while home and TV are on | It checks once a minute, so wait up to a minute. You can also right-click the task > Run. If it never starts, run `py tv_monitor.py --check` and read `tv_monitor.log` |
 | Re-install after updating | After changing the schedule or updating `install_tv_monitor_task.ps1`, run the installer again (it replaces the old task) |
-| Stop the server now | Task Manager > end `pythonw.exe` running `localflix.py` |
+| Stop the server now | See section 8 (find what uses the port, then stop it) |
+| I updated LocalFlix but the site/TV still behaves the old way | The old hidden server is still running and the monitor leaves a running server alone. Restart it: section 8 |
 | Server keeps running after the TV left | It was probably started by you, so the monitor leaves it alone. Only a server the monitor started (pid kept in `tv_monitor.server.pid`) is stopped |
 
-## 8. Uninstall
+## 8. After updating LocalFlix: restart the hidden server
+
+The server the monitor starts has no window, and the monitor never restarts a server that is already running. So after you apply a patch or change any `.py` file, the old code keeps running until you stop that server yourself. A sign of this: you start `py localflix.py` by hand but the site still behaves the old way, because the old server still holds the port.
+
+Run in PowerShell, in your LocalFlix folder. `8080` is the default port; if you changed it, use the port from `config.json`.
+
+**1. Find what is using the port** (this also shows the program and the command it was started with, so you can see where it runs from):
+
+```powershell
+Get-NetTCPConnection -LocalPort 8080 -State Listen | ForEach-Object {
+  Get-CimInstance Win32_Process -Filter "ProcessId=$($_.OwningProcess)" |
+    Select-Object ProcessId, Name, ExecutablePath, CommandLine
+}
+```
+
+`CommandLine` should contain the full path to `localflix.py`. If that path is a different folder from the one you patched, you applied the patch to the wrong copy.
+
+Same idea with older tools, if the command above is not available:
+
+```powershell
+netstat -ano | findstr :8080
+tasklist /FI "PID eq 1234" /V
+```
+
+(replace `1234` with the last number on the `LISTENING` line)
+
+**2. Find every LocalFlix server process**, whatever port it uses:
+
+```powershell
+Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*localflix.py*' } |
+  Select-Object ProcessId, Name, CommandLine
+```
+
+**3. Stop it.** Either use the number from step 1 or 2:
+
+```powershell
+Stop-Process -Id 1234 -Force
+```
+
+or stop whatever is listening on the port in one go:
+
+```powershell
+Get-NetTCPConnection -LocalPort 8080 -State Listen | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
+```
+
+**4. Check it is gone:**
+
+```powershell
+py tv_monitor.py --check
+```
+
+`Server on port 8080` should now say it is not running.
+
+**5. Optional, after a Python update:** delete the old compiled files so nothing stale is used:
+
+```powershell
+Remove-Item lf\__pycache__ -Recurse -Force -ErrorAction SilentlyContinue
+```
+
+**6. Start it again.** Either let the monitor do it (it starts the server within a minute when you are home and the TV is on the Wi-Fi), or run it yourself to see the startup banner, which shows the version:
+
+```powershell
+py localflix.py
+```
+
+Then open `http://localhost:8080/api/movies` to see exactly what the server sends (titles, categories, posters). A browser or TV that still shows old data after that only needs a hard refresh (Ctrl+F5) or a force-stop and reopen of the TV app.
+
+---
+
+## 9. Uninstall
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install_tv_monitor_task.ps1 -Remove

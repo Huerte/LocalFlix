@@ -1,0 +1,38 @@
+# Local configuration and library data
+/config.json
+/local.properties
+/localflix_data/
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Gradle and Android builds
+.gradle/
+**/build/
+/captures/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+
+# IDE and editor files
+.idea/
+*.iml
+.vscode/
+
+# OS and log files
+.DS_Store
+Thumbs.db
+*.log

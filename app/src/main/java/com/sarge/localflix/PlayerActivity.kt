@@ -165,7 +165,6 @@ class PlayerActivity : FragmentActivity() {
             req.ext.ifEmpty { null }
         ).joinToString("  ·  ")
         b.subTitleText.visibility = if (b.subTitleText.text.isEmpty()) View.GONE else View.VISIBLE
-        b.bNext.visibility = if (req.nextId != null) View.VISIBLE else View.GONE
         b.playerView.subtitleView?.apply {
             setApplyEmbeddedStyles(false)
             setStyle(CaptionStyleCompat(Color.WHITE, Color.TRANSPARENT, Color.TRANSPARENT, CaptionStyleCompat.EDGE_TYPE_OUTLINE, Color.BLACK, null))
@@ -177,7 +176,6 @@ class PlayerActivity : FragmentActivity() {
         b.bFwd10.setOnClickListener { seekBy(10_000) }
         b.bSubs.setOnClickListener { openSubtitleMenu() }
         b.bAudio.setOnClickListener { openAudioMenu() }
-        b.bNext.setOnClickListener { finishWithResult(req.nextId) }
         b.bSet.setOnClickListener { openSettingsMenu() }
         b.btnBack.setOnClickListener { finishWithResult(null) }
     }
@@ -662,7 +660,7 @@ class PlayerActivity : FragmentActivity() {
             loadCuesIfNeeded()
             if (!transcoding) { appliedSub = Int.MIN_VALUE; applySubtitle() }
         }
-        updateSyncUi()
+        onOffsetUi?.invoke()
         drawCue()
     }
 
@@ -708,8 +706,6 @@ class PlayerActivity : FragmentActivity() {
         items.add(MenuEntry("Customize", false, header = true) {})
         items.add(MenuEntry("Appearance and timing", false, keep = true, tail = true,
             sub = "Size $subSizePct%  ·  Delay " + offsetText(subOffsetMs)) { openAppearanceMenu() })
-        items.add(MenuEntry("Subtitle sync", false, keep = true, tail = true,
-            sub = if (subOffsetMs == 0L) "No offset" else offsetText(subOffsetMs)) { openSyncMenu(b.bSubs) { openSubtitleMenu() } })
         openMenu("Subtitles", items, b.bSubs)
     }
 
@@ -818,6 +814,7 @@ class PlayerActivity : FragmentActivity() {
 
     /** Same screen as the web player's "Appearance and timing". Everything updates in place so the focus never jumps. */
     private fun openAppearanceMenu() {
+        loadCuesIfNeeded(true)          // fetch the lines now so the first Delay step shows up at once
         beginMenu("Appearance and timing", b.bSubs)
         menuBackTo = { openSubtitleMenu() }
         val refresh = ArrayList<() -> Unit>()
@@ -872,70 +869,6 @@ class PlayerActivity : FragmentActivity() {
         b.menuList.addView(reset, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         if (subChoice < 0) showMsg("Turn a subtitle on to see the change.")
         showMenu(first)
-    }
-
-    // ── subtitle sync panel: [+] value [-] ─────────────────────────────────────
-
-    private var syncValue: TextView? = null
-    private var syncHint: TextView? = null
-
-    /**
-     * Two big buttons, + (subtitles later) above and - (subtitles earlier) below, 0.1 s per step. Pressing OK once
-     * moves one step; HOLDING OK keeps stepping until the key is released. While it runs only a text label and the
-     * subtitle line are updated, so it stays smooth. The value is saved when the key is released.
-     */
-    private fun openSyncMenu(opener: View, back: () -> Unit) {
-        loadCuesIfNeeded(true)          // fetch the lines now so the first step shows up at once
-        beginMenu("Subtitle sync", opener)
-        menuBackTo = back
-        val lp = { LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(4) } }
-
-        fun stepButton(label: String, dir: Int) = menuButton(label, false).apply {
-            gravity = Gravity.CENTER
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
-            minimumHeight = dp(60)
-            setOnClickListener { delayHold.step(dir); delayHold.end() }   // touch / mouse; the remote is handled in dispatchKeyEvent
-            holdables[this] = HoldKey(dir, delayHold)
-        }
-        val plus = stepButton("+  0.1s   (subtitles later)", 1)
-        val minus = stepButton("-  0.1s   (subtitles earlier)", -1)
-        val value = TextView(this).apply {
-            gravity = Gravity.CENTER
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 34f)
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-            setTextColor(ContextCompat.getColor(this@PlayerActivity, R.color.white))
-        }
-        val hint = TextView(this).apply {
-            gravity = Gravity.CENTER
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-            setTextColor(ContextCompat.getColor(this@PlayerActivity, R.color.muted))
-        }
-        val reset = menuButton("Reset to 0", false).apply { gravity = Gravity.CENTER; setOnClickListener { applyOffset(0); commitOffset() } }
-        b.menuList.addView(plus, lp())
-        b.menuList.addView(value, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(2) })
-        b.menuList.addView(hint, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(8) })
-        b.menuList.addView(minus, lp())
-        b.menuList.addView(reset, lp())
-        syncValue = value; syncHint = hint
-        updateSyncUi()
-        if (subChoice < 0) showMsg("Turn a subtitle on to see the change.")
-        showMenu(plus)
-    }
-
-    private fun updateSyncUi() {
-        onOffsetUi?.invoke()
-        val v = syncValue ?: return
-        v.text = offsetText(subOffsetMs)
-        v.setTextColor(when {
-            subOffsetMs > 0 -> 0xFF7BE0A0.toInt()
-            subOffsetMs < 0 -> 0xFFFFB27B.toInt()
-            else -> ContextCompat.getColor(this, R.color.white)
-        })
-        syncHint?.text = when {
-            subOffsetMs == 0L -> "In sync.  Hold OK on + or - to keep going."
-            subOffsetMs > 0 -> "Subtitles appear later.  Hold OK to keep going."
-            else -> "Subtitles appear earlier.  Hold OK to keep going."
-        }
     }
 
     // ── subtitle file browser (files in the server's subtitle folder) ─────────
@@ -1112,7 +1045,7 @@ class PlayerActivity : FragmentActivity() {
     private fun beginMenu(title: String, opener: View) {
         stopHold()
         holdables.clear()
-        onStyleUi = null; onOffsetUi = null; syncValue = null; syncHint = null
+        onStyleUi = null; onOffsetUi = null
         browseJob?.cancel()
         menuBackTo = null
         menuOpener = opener

@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
@@ -391,6 +392,7 @@ class MainActivity : FragmentActivity() {
         }
         val dp = resources.displayMetrics.density
         fun px(v: Int) = (v * dp).toInt()
+        val shownAt = SystemClock.uptimeMillis()
 
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -417,7 +419,13 @@ class MainActivity : FragmentActivity() {
                 else -> InputType.TYPE_CLASS_TEXT
             }
             imeOptions = if (kind == "search") EditorInfo.IME_ACTION_SEARCH else EditorInfo.IME_ACTION_DONE
-            setOnEditorActionListener { _, _, _ -> finishWith(text.toString(), true); true }
+            // The remote's OK / Enter key that opened this box is often still held down (key repeat) and lands in this
+            // field as an "Enter" action, which used to close the box again at once, so the keyboard never showed.
+            // Ignore key-driven actions for the first moments and any repeats; real keyboard actions still submit.
+            setOnEditorActionListener { _, _, ev ->
+                if (ev != null && (ev.repeatCount > 0 || SystemClock.uptimeMillis() - shownAt < 700)) return@setOnEditorActionListener true
+                finishWith(text.toString(), true); true
+            }
         }
         box.addView(edit, LinearLayout.LayoutParams(px(560), px(56)).apply { topMargin = px(18) })
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -440,7 +448,9 @@ class MainActivity : FragmentActivity() {
         textDialog = d
         d.show()
         edit.requestFocus()
-        edit.postDelayed({ (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(edit, InputMethodManager.SHOW_IMPLICIT) }, 150)
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        edit.postDelayed({ imm.showSoftInput(edit, InputMethodManager.SHOW_IMPLICIT) }, 150)
+        edit.postDelayed({ if (d.isShowing && edit.hasFocus()) imm.showSoftInput(edit, 0) }, 500)   // second try if the first came too early
     }
 
     private fun launchPlayer(json: String) {

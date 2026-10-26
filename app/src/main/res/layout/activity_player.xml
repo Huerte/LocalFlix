@@ -2,7 +2,7 @@
 <!--
   Native player screen. Laid out like the web player (static/player.js + app.css .player):
     top    : back button + title + "year · resolution · format"
-    bottom : seek bar, then [-10 | play/pause | +10] cluster, time, ... Next, Subtitles, Audio, Settings
+    bottom : seek bar, then [-10 | play/pause | +10] cluster, time, ... Subtitles, Audio, Settings
   All controls sit inside a TV safe area (56dp sides, 36dp top/bottom) because many TVs crop the screen edges.
 -->
 <FrameLayout
@@ -232,19 +232,6 @@
                     android:layout_width="0dp"
                     android:layout_height="1dp"
                     android:layout_weight="1" />
-
-                <ImageButton
-                    android:id="@+id/bNext"
-                    android:layout_width="52dp"
-                    android:layout_height="52dp"
-                    android:layout_marginEnd="8dp"
-                    android:background="@drawable/bg_pbtn"
-                    android:contentDescription="Next episode"
-                    android:nextFocusUp="@id/seekBar"
-                    android:padding="13dp"
-                    android:scaleType="fitCenter"
-                    android:src="@drawable/ic_next"
-                    android:visibility="gone" />
 
                 <Button
                     android:id="@+id/bSubs"

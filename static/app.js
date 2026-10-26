@@ -1064,6 +1064,7 @@
       if (t.id === 'q' && sel >= 0) return;            // OK on a highlighted suggestion opens it
       if (!(window.LocalFlixTV && window.LocalFlixTV.editText)) return;   // older app build: nothing to open
       e.preventDefault(); e.stopPropagation();
+      if (e.repeat) return;                            // a held OK must open the text box once, not again and again
       pendingField = t;
       const lbl = t.getAttribute('aria-label') || t.placeholder || 'Enter text';
       try { window.LocalFlixTV.editText(lbl, t.value || '', t.placeholder || '', t.type === 'search' ? 'search' : (t.type || 'text')); }
@@ -1103,6 +1104,27 @@
         catch { pendingField = null; }
       }, 120);
     });
+    // 6. The logo and the Home tab also re-scan the library: the link still opens Home, and on top of that the laptop
+    //    looks for new / removed movies and the page reloads its lists (same as Settings > Save & Rescan, without saving).
+    let rescanning = false;
+    LF.rescanHome = async function () {
+      if (rescanning) return;
+      rescanning = true;
+      LF.toast('Refreshing library...');
+      try {
+        // A big library can take a while to scan: use a longer limit than LF.api's default 7 s (which means "laptop is gone").
+        const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        const timer = ctl ? setTimeout(() => ctl.abort(), 60000) : 0;
+        try { await LF.api('/api/rescan', ctl ? { method: 'POST', signal: ctl.signal } : { method: 'POST' }); }
+        finally { if (timer) clearTimeout(timer); }
+        await LF.load();                                  // fresh lists, redraws the current page (focus stays on the top bar)
+        if (LF.offline) LF.toast(LF.OFFLINE_MSG);
+        else { const n = LF.movies.length; LF.toast('Library refreshed  ·  ' + n + ' movie' + (n === 1 ? '' : 's')); }
+      } catch (err) {
+        LF.toast(err && err.friendly ? err.message : 'Could not refresh the library. Please try again.');
+      } finally { rescanning = false; }
+    };
+    $$('.brand, .tabs a[data-tab="home"]').forEach((a) => a.addEventListener('click', () => { LF.rescanHome(); }));
   }
 
   /* ---- routing ---- */

@@ -33,6 +33,12 @@
     _all() { return store.get('lf.progress', {}) || {}; },
     get(id) { return this._all()[id]; },
     set(id, t, dur) { const a = this._all(); a[id] = { t, d: dur, ts: Date.now() }; store.set('lf.progress', a); },
+    // The movie played most recently (any state), or null.
+    last() {
+      const a = this._all(); let best = null;
+      for (const id in a) if (a[id] && a[id].ts && (!best || a[id].ts > a[best].ts)) best = id;
+      return best;
+    },
     markWatched(id) { const a = this._all(); if (a[id]) { a[id].watched = true; a[id].t = null; a[id].ts = Date.now(); } else { a[id] = { watched: true, ts: Date.now() }; } store.set('lf.progress', a); },
     // Movies that can be continued, most recently watched first.
     resumable() {
@@ -201,7 +207,21 @@
     }
     const addedSort = movies.slice().sort((a, b) => b.added - a.added);
     const recent30 = addedSort.slice(0, 30);
-    const hero = recent30[0];
+    // Header: the movie played last (continue / start over). Only when nothing was played yet it shows the newest one.
+    const lastM = byId(LF.progress.last());
+    const hero = lastM || recent30[0];
+    const hp = lastM ? LF.progress.get(hero.id) : null;
+    const canResume = !!(hp && !hp.watched && hp.t > 10 && hp.d && hp.t < hp.d - 30);
+    const eyebrow = !lastM ? 'Just Added' : canResume ? 'Continue Watching' : 'Watch Again';
+    const heroActions = !lastM
+      ? `<a class="btn primary" href="#/watch/${hero.id}"><svg class="ic"><use href="#i-play"/></svg>Play</a>
+              <a class="btn ghost" href="#/movie/${hero.id}">More info</a>`
+      : canResume
+        ? `<a class="btn primary" href="#/watch/${hero.id}?t=${Math.floor(hp.t)}"><svg class="ic"><use href="#i-play"/></svg>Resume ${LF.fmtTime(hp.t)}</a>
+              <a class="btn" href="#/watch/${hero.id}?t=0">Start over</a>
+              <a class="btn ghost" href="#/movie/${hero.id}">More info</a>`
+        : `<a class="btn primary" href="#/watch/${hero.id}?t=0"><svg class="ic"><use href="#i-play"/></svg>Play again</a>
+              <a class="btn ghost" href="#/movie/${hero.id}">More info</a>`;
     const info = LF.info || {};
     const heroMeta = posters.infoCache ? posters.infoCache[hero.id] : {};
     function rowHtml(title, list, limit = 18) {
@@ -235,17 +255,16 @@
         <div class="hero-in">
           <div class="hero-poster">${posterEl(hero)}</div>
           <div class="hero-txt">
-            <div class="eyebrow">Just Added</div>
+            <div class="eyebrow">${eyebrow}</div>
             <h1>${esc(hero.title)}</h1>
-            <div class="meta"><span>${hero.year || ''}</span>${hero.year ? '<span class="dot"></span>' : ''}<span>${hero.ext}</span>${hero.subs ? '<span class="dot"></span><span>Subtitles</span>' : ''}</div>
+            <div class="meta"><span>${hero.year || ''}</span>${hero.year ? '<span class="dot"></span>' : ''}<span>${hero.ext}</span>${hero.subs ? '<span class="dot"></span><span>Subtitles</span>' : ''}${canResume ? `<span class="dot"></span><span>${LF.fmtTime(hp.t)} of ${LF.fmtTime(hp.d)}</span>` : ''}</div>
             <div class="actions">
-              <a class="btn primary" href="#/watch/${hero.id}"><svg class="ic"><use href="#i-play"/></svg>Play</a>
-              <a class="btn ghost" href="#/movie/${hero.id}">More info</a>
+              ${heroActions}
             </div>
           </div>
         </div>
       </div>
-      ${rowHtml('Continue Watching', LF.progress.resumable().map(byId).filter(Boolean), 12)}
+      ${rowHtml('Continue Watching', LF.progress.resumable().filter((id) => id !== hero.id).map(byId).filter(Boolean), 12)}
       ${rowHtml('Recently Added', recent30, 16)}
       ${rowHtml('All Movies', movies.slice().sort((a, b) => a._k.localeCompare(b._k)), 24)}
       ${folderRows}
@@ -257,7 +276,7 @@
       const a = document.activeElement;
       if (!a || a === document.body) {
         const prev = prevId && $('.card[data-id="' + prevId + '"]');
-        const p = prev || $('#row-ContinueWatching .card') || $('.hero .btn.primary'); if (p) p.focus({ preventScroll: true });
+        const p = prev || $('.hero .btn.primary'); if (p) p.focus({ preventScroll: true });
       }
     }, 60);
   }
@@ -863,27 +882,30 @@
     rr();
     // 2. Text fields: stay silent until OK is pressed, so merely moving over the search box does not pop up the keyboard.
     const isText = (el) => el && el.tagName === 'INPUT' && /^(text|search|url|email|tel|password)$/.test(el.type || 'text');
-    document.addEventListener('focusin', (e) => { if (isText(e.target) && !e.target._kb) e.target.setAttribute('inputmode', 'none'); });
-    let kbSwitch = false;   // true while we re-focus the field on purpose (see below): that blur must not reset anything
-    document.addEventListener('focusout', (e) => {
-      if (!isText(e.target) || kbSwitch) return;
-      e.target._kb = false; e.target.setAttribute('inputmode', 'none');
-      try { window.LocalFlixTV.hideKeyboard(); } catch { /* bridge missing */ }
-    });
+    // The WebView must never raise its own keyboard (it does not appear on many TVs); OK opens the app's own text box.
+    document.addEventListener('focusin', (e) => { if (isText(e.target)) e.target.setAttribute('inputmode', 'none'); });
+    let pendingField = null;
+    // Called by the app when the text box closes: text = what was typed, null = cancelled; submit = OK / Search pressed.
+    LF.onNativeText = function (text, submit) {
+      const t = pendingField; pendingField = null;
+      if (!t) return;
+      try { t.focus({ preventScroll: true }); } catch { /* gone */ }
+      if (text == null) return;
+      t.value = text;
+      t.dispatchEvent(new Event('input', { bubbles: true }));
+      if (submit && t.id === 'q') runSearch(true);
+    };
     document.addEventListener('keydown', (e) => {
       const t = e.target;
       // Some TV builds report the remote's OK button as keyCode 23 (DPAD_CENTER) instead of key "Enter".
-      if (!(e.key === 'Enter' || e.keyCode === 13 || e.keyCode === 23) || !isText(t) || t._kb) return;
+      if (!(e.key === 'Enter' || e.keyCode === 13 || e.keyCode === 23) || !isText(t) || t.readOnly) return;
       if (t.id === 'q' && sel >= 0) return;            // OK on a highlighted suggestion opens it
-      e.preventDefault(); e.stopPropagation();          // first OK = open the on-screen keyboard
-      t._kb = true; t.setAttribute('inputmode', t.type === 'search' ? 'search' : 'text');
-      // The field got focus while inputmode was "none", so the WebView has no text-input connection for it, and
-      // changing the attribute afterwards does not tell the browser. Re-focusing makes it re-read inputmode;
-      // without this the keyboard request below has nothing to attach to and no keyboard appears.
-      kbSwitch = true;
-      try { const a = t.selectionStart, z = t.selectionEnd; t.blur(); t.focus({ preventScroll: true }); try { t.setSelectionRange(a, z); } catch { /* no caret */ } }
-      finally { kbSwitch = false; }
-      try { window.LocalFlixTV.showKeyboard(); } catch { /* bridge missing */ }
+      if (!(window.LocalFlixTV && window.LocalFlixTV.editText)) return;   // older app build: nothing to open
+      e.preventDefault(); e.stopPropagation();
+      pendingField = t;
+      const lbl = t.getAttribute('aria-label') || t.placeholder || 'Enter text';
+      try { window.LocalFlixTV.editText(lbl, t.value || '', t.placeholder || '', t.type === 'search' ? 'search' : (t.type || 'text')); }
+      catch { pendingField = null; }
     }, true);
     // 3. The suggestion dropdown must never stay open over the page once focus has left the search box.
     sq().addEventListener('blur', closeSugg);

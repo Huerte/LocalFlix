@@ -536,15 +536,36 @@ class PlayerActivity : FragmentActivity() {
     // ── menus (subtitles / audio) ─────────────────────────────────────────────
 
     /** [keep] = the pick opens another screen inside the same panel, so the panel must not be closed first. */
-    private class MenuEntry(val label: String, val checked: Boolean, val keep: Boolean = false, val onPick: () -> Unit)
+    private class MenuEntry(val label: String, val checked: Boolean, val keep: Boolean = false, val header: Boolean = false, val onPick: () -> Unit)
 
     private fun openSubtitleMenu() {
         val items = ArrayList<MenuEntry>()
         items.add(MenuEntry("Off", subChoice < 0) { selectSubtitle(-1) })
         subs.forEachIndexed { i, s -> items.add(MenuEntry(s.label, subChoice == i) { selectSubtitle(i) }) }
         items.add(MenuEntry("Browse subtitle files...", false, keep = true) { openSubtitleBrowser() })
-        items.add(MenuEntry("Subtitle sync:  " + offsetText(subOffsetMs), false, keep = true) { openSyncMenu(b.bSubs) { openSubtitleMenu() } })
+        // Everything that adjusts how subtitles look or line up lives here, not in the Playback menu.
+        items.add(MenuEntry("Subtitle settings", false, header = true) {})
+        items.add(MenuEntry("Sync:  " + offsetText(subOffsetMs), false, keep = true) { openSyncMenu(b.bSubs) { openSubtitleMenu() } })
+        items.add(MenuEntry("Size:  " + subSizeName(), false, keep = true) { openSubtitleSizeMenu() })
         openMenu("Subtitles", items, b.bSubs)
+    }
+
+    private val sizeChoices = listOf("Small" to 80, "Normal" to 100, "Large" to 130, "Huge" to 170)
+    private fun subSizeName() = sizeChoices.firstOrNull { it.second == subSizePct }?.first ?: "$subSizePct%"
+
+    /** Subtitle size. The change shows on screen at once; Back returns to the Subtitles list. */
+    private fun openSubtitleSizeMenu() {
+        val items = ArrayList<MenuEntry>()
+        for ((label, pct) in sizeChoices) {
+            items.add(MenuEntry(label, subSizePct == pct, keep = true) {
+                subSizePct = pct
+                prefs.edit().putInt(KEY_SUB_SIZE, pct).apply()
+                applySubtitleLook()
+                openSubtitleSizeMenu()
+            })
+        }
+        openMenu("Subtitle size", items, b.bSubs)
+        menuBackTo = { openSubtitleMenu() }
     }
 
     // ── subtitle sync panel: [+] value [-] ─────────────────────────────────────
@@ -770,14 +791,6 @@ class PlayerActivity : FragmentActivity() {
                 showMsg(if (x == 1f) "Normal speed" else "Speed ${x}x")
             })
         }
-        items.add(MenuEntry("Subtitle sync:  " + offsetText(subOffsetMs), false, keep = true) { openSyncMenu(b.bSet) { openSettingsMenu() } })
-        for ((label, pct) in listOf("Small" to 80, "Normal" to 100, "Large" to 130, "Huge" to 170)) {
-            items.add(MenuEntry("Subtitle size:  $label", subSizePct == pct) {
-                subSizePct = pct
-                prefs.edit().putInt(KEY_SUB_SIZE, pct).apply()
-                applySubtitleLook()
-            })
-        }
         openMenu("Playback", items, b.bSet)
     }
 
@@ -821,6 +834,15 @@ class PlayerActivity : FragmentActivity() {
         var focusTarget: View? = null
         if (items.isEmpty()) b.menuList.addView(menuNote("Nothing to choose from."))
         for (e in items) {
+            if (e.header) {      // a section title: not focusable
+                b.menuList.addView(TextView(this).apply {
+                    text = e.label.uppercase(Locale.getDefault()); textSize = 13f; letterSpacing = 0.08f
+                    setTypeface(typeface, android.graphics.Typeface.BOLD)
+                    setTextColor(ContextCompat.getColor(this@PlayerActivity, R.color.muted))
+                    setPadding(dp(8), dp(14), dp(8), dp(6))
+                })
+                continue
+            }
             val btn = menuButton((if (e.checked) "✓    " else "       ") + e.label, e.checked).apply {
                 setOnClickListener { if (!e.keep) closeMenu(); e.onPick() }
             }

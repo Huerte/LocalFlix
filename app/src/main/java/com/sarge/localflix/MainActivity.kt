@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.Window
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.webkit.JavascriptInterface
@@ -17,7 +18,17 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.app.Dialog
+import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
+import android.text.InputType
+import android.view.Gravity
+import android.view.inputmethod.EditorInfo
+import android.widget.Button
+import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
@@ -269,6 +280,13 @@ class MainActivity : FragmentActivity() {
         /** The page tells us whether Back would have nothing left to close (home screen). */
         @JavascriptInterface fun atRoot(root: Boolean) { pageAtRoot = root }
 
+        /**
+         * Text entry for the page's search box and settings fields. The WebView's own keyboard does not come up on
+         * many TVs, so the page asks us instead: we show a native box (whose keyboard works, like on the server
+         * screen) and hand the text back through LF.onNativeText.
+         */
+        @JavascriptInterface fun editText(title: String, value: String, hint: String, kind: String) = runOnUiThread { showTextInput(title, value, hint, kind) }
+
         /** Watch positions saved by the native player (see ResumeStore). The page merges them into its own list. */
         @JavascriptInterface fun getResume(): String = ResumeStore.toJson(this@MainActivity)
 
@@ -298,6 +316,74 @@ class MainActivity : FragmentActivity() {
             val wv = webView ?: return@runOnUiThread
             (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(wv.windowToken, 0)
         }
+    }
+
+    private var textDialog: Dialog? = null
+
+    private fun showTextInput(title: String, value: String, hint: String, kind: String) {
+        textDialog?.dismiss()
+        val d = Dialog(this)
+        var done = false
+        fun finishWith(text: String?, submit: Boolean) {
+            if (done) return
+            done = true
+            d.dismiss()
+            val arg = if (text == null) "null" else JSONObject.quote(text)
+            webView?.evaluateJavascript("window.LF && LF.onNativeText && LF.onNativeText($arg, $submit)", null)
+            webView?.requestFocus()
+        }
+        val dp = resources.displayMetrics.density
+        fun px(v: Int) = (v * dp).toInt()
+
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundResource(R.drawable.bg_panel)
+            setPadding(px(28), px(24), px(28), px(24))
+        }
+        box.addView(TextView(this).apply {
+            text = title; textSize = 22f; setTextColor(Color.WHITE); setTypeface(typeface, android.graphics.Typeface.BOLD)
+        })
+        val edit = EditText(this).apply {
+            setText(value); setSelection(value.length)
+            this.hint = hint
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.muted))
+            setTextColor(Color.WHITE); textSize = 20f
+            setBackgroundResource(R.drawable.bg_input)
+            setPadding(px(16), 0, px(16), 0)
+            setSingleLine()
+            importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
+            inputType = when (kind) {
+                "password" -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                "url" -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+                "email" -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+                "tel" -> InputType.TYPE_CLASS_PHONE
+                else -> InputType.TYPE_CLASS_TEXT
+            }
+            imeOptions = if (kind == "search") EditorInfo.IME_ACTION_SEARCH else EditorInfo.IME_ACTION_DONE
+            setOnEditorActionListener { _, _, _ -> finishWith(text.toString(), true); true }
+        }
+        box.addView(edit, LinearLayout.LayoutParams(px(560), px(56)).apply { topMargin = px(18) })
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        fun btn(label: String, onClick: () -> Unit) = Button(this, null, 0, R.style.PlayerBtn).apply {
+            text = label; setOnClickListener { onClick() }
+        }
+        row.addView(btn(if (kind == "search") "Search" else "OK") { finishWith(edit.text.toString(), true) },
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, px(52)).apply { marginEnd = px(10) })
+        row.addView(btn("Cancel") { finishWith(null, false) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, px(52)))
+        box.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = px(18) })
+
+        d.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        d.setContentView(box)
+        d.setOnCancelListener { finishWith(null, false) }    // Back
+        d.window?.apply {
+            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            setGravity(Gravity.CENTER)
+            setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE or WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN)
+        }
+        textDialog = d
+        d.show()
+        edit.requestFocus()
+        edit.postDelayed({ (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(edit, InputMethodManager.SHOW_IMPLICIT) }, 150)
     }
 
     private fun launchPlayer(json: String) {

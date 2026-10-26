@@ -145,7 +145,8 @@
     const dur = (det && det.dur) || movie.dur || 0;
     nativeDur[movie.id] = dur;
     const payload = {
-      id: movie.id, title: movie.title, year: movie.year || null,
+      id: movie.id, title: movie.title, year: movie.year || null, ext: movie.ext || '',
+      height: (det && det.probe && det.probe.video && det.probe.video.h) || 0,
       streamUrl: abs('/media/' + movie.id), transcodeUrl: abs('/transcode/' + movie.id),
       startSeconds: startAt || 0, duration: dur, subtitles, audio,
       nextId: det && det.next ? det.next : null, nextTitle: nx ? nx.title : null,

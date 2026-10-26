@@ -23,7 +23,10 @@ data class PlayRequest(
     val audio: List<AudioInfo>,
     val nextId: String?,
     val nextTitle: String?,
-    val ffmpeg: Boolean             // true = /transcode can be used as a fallback
+    val ffmpeg: Boolean,            // true = /transcode can be used as a fallback
+    val year: Int = 0,              // for the "2019 · 1080p · MKV" line under the title
+    val ext: String = "",
+    val height: Int = 0
 ) {
     companion object {
         fun parse(json: String): PlayRequest {
@@ -54,7 +57,10 @@ data class PlayRequest(
                 audio = audio,
                 nextId = str("nextId"),
                 nextTitle = str("nextTitle"),
-                ffmpeg = o.optBoolean("ffmpeg", false)
+                ffmpeg = o.optBoolean("ffmpeg", false),
+                year = o.optInt("year", 0),
+                ext = o.optString("ext", ""),
+                height = o.optInt("height", 0)
             )
         }
     }

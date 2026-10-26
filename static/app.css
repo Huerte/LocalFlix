@@ -552,3 +552,55 @@ html.lftv .topbar{backdrop-filter:none;-webkit-backdrop-filter:none;background:r
   .tb-select,.tb-btn{font-size:.82rem;height:36px}
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* =====================================================================================
+   LocalFlix TV app (html.lftv) - safe area, room for the focus zoom, and speed
+   ===================================================================================== */
+html.lftv{
+  --safe-x:6vw;                     /* TVs crop/overscan the edges: keep everything inside 6% / 5% */
+  --safe-y:5vh;
+  --pad:6vw;
+  --ring-card:0 0 0 3px var(--accent);  /* no big blurred glow: slow to paint and it was clipped by the rows */
+  scroll-behavior:auto;             /* scrolling is animated by app.js, never by the browser */
+}
+html.lftv body{min-height:0}
+
+/* top bar inside the safe area */
+html.lftv .topbar{height:calc(68px + 3vh);padding:3vh var(--safe-x) 0;background:#0a0c10}
+html.lftv .page{padding:8px var(--safe-x) calc(var(--safe-y) + 64px)}
+
+/* rows: padding gives the focused (zoomed) card + its ring room, so nothing is cut off at the sides, top or bottom */
+html.lftv .row{
+  scroll-snap-type:none;            /* snapping fought the scripted scrolling when keys were pressed quickly */
+  gap:16px;padding:26px 28px 34px;margin:-14px -28px -8px;
+  overscroll-behavior:contain;
+}
+html.lftv .row::after{content:"";flex:0 0 28px}
+html.lftv .row .card{scroll-snap-align:none}
+html.lftv .grid{gap:30px 20px;padding:14px 0;margin-top:16px}
+
+/* focus effect: ONE rule, transform only (GPU), short */
+html.lftv .card{transition:transform .12s ease-out}
+html.lftv .card:hover{transform:none}
+html.lftv .card:focus,html.lftv .card:focus-visible{transform:scale(1.08);z-index:10;box-shadow:none;will-change:transform}
+html.lftv .card:focus .poster,html.lftv .card:focus-visible .poster{box-shadow:var(--ring-card)}
+
+/* remove everything that is expensive on a TV GPU/CPU */
+html.lftv .poster{box-shadow:none;transition:none}
+html.lftv .poster img{transition:opacity .15s}
+html.lftv .card-overlay{display:none}
+html.lftv .ph.shim::after,html.lftv .skel::after{animation:none}
+html.lftv .badge{backdrop-filter:none;-webkit-backdrop-filter:none}
+html.lftv .hero{background:linear-gradient(120deg,#1b2030,#0e1014 70%)}
+html.lftv .hero-bg{display:none}   /* blur(28px) on a scaled full-width image: the single heaviest thing on the home page */
+html.lftv .hero-poster{box-shadow:none}
+html.lftv .btn,html.lftv .tabs a,html.lftv .icon-btn,html.lftv .tb-btn,html.lftv .tb-select,html.lftv .sg,html.lftv .m-close{transition:none}
+html.lftv .btn:hover{transform:none}
+html.lftv .scrim{animation:none}
+html.lftv .modal{box-shadow:none}
+
+/* dialogs and toasts inside the safe area */
+html.lftv .scrim{padding:var(--safe-y) var(--safe-x);background:rgba(0,0,0,.88)}
+html.lftv .modal{max-height:calc(100vh - 2 * var(--safe-y))}
+html.lftv .toasts{bottom:calc(var(--safe-y) + 8px)}
+html.lftv .sugg{box-shadow:none}

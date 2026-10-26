@@ -1,16 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Same palette as static/app.css so the native screens match the web UI. -->
+<!-- Same palette as static/app.css, so the native screens look exactly like the web UI. -->
 <resources>
-    <color name="bg">#0e1014</color>
-    <color name="surface">#151821</color>
-    <color name="surface2">#1c2029</color>
-    <color name="surface3">#252a35</color>
-    <color name="line">#2a2f3a</color>
+    <color name="bg">#0a0c10</color>
+    <color name="surface">#111318</color>
+    <color name="surface2">#181c24</color>
+    <color name="surface3">#1f2330</color>
+    <color name="line">#242937</color>
     <color name="text">#eceef3</color>
-    <color name="muted">#a3abbb</color>
-    <color name="accent">#4f8cff</color>
-    <color name="accent_ink">#06142e</color>
+    <color name="muted">#7a8399</color>
+    <color name="accent">#e50914</color>
+    <color name="accent_ink">#FFFFFF</color>
     <color name="danger">#ff4757</color>
     <color name="white">#FFFFFF</color>
     <color name="black">#000000</color>
+    <color name="glass">#14FFFFFF</color>
+    <color name="glass_line">#26FFFFFF</color>
+    <color name="glass_focus">#33FFFFFF</color>
 </resources>

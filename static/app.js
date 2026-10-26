@@ -115,11 +115,13 @@
   function byId(id) { return LF.movies.find((m) => m.id === id); }
 
   /* ---- poster image ---- */
+  // The TV app asks the server for a small copy (?w=): decoding full-size covers is what makes a TV stutter.
+  const posterUrl = LF.posterUrl = (m, w) => `/poster/${m.id}?v=${m.pv}${LF.app ? '&w=' + (w || 360) : ''}`;
   function posterEl(m, cls) {
     const prog = LF.progress.get(m.id);
     const pct = prog && prog.d ? Math.round(prog.t / prog.d * 100) : 0;
     const watched = prog && prog.watched;
-    return `<div class="poster ${cls || ''}" data-id="${m.id}"><div class="ph ${m.poster !== 'ready' ? 'shim' : ''}">${m.poster === 'ready' ? `<img data-p="1" alt="" src="/poster/${m.id}?v=${m.pv}" loading="lazy">` : `<b>${esc(m.title)}</b><small>${m.year || m.ext}</small>`}</div>${m.subs ? '<div class="badges"><span class="badge cc">CC</span></div>' : ''}</div>${pct > 3 && !watched ? `<div class="prog"><i style="width:${pct}%"></i></div>` : ''}`;
+    return `<div class="poster ${cls || ''}" data-id="${m.id}"><div class="ph ${m.poster !== 'ready' ? 'shim' : ''}">${m.poster === 'ready' ? `<img data-p="1" alt="" decoding="async" src="${posterUrl(m)}" loading="lazy">` : `<b>${esc(m.title)}</b><small>${m.year || m.ext}</small>`}</div>${m.subs ? '<div class="badges"><span class="badge cc">CC</span></div>' : ''}</div>${pct > 3 && !watched ? `<div class="prog"><i style="width:${pct}%"></i></div>` : ''}`;
   }
   // IntersectionObserver-based image lazy loader for smooth card rendering
   let _imgObs = null;
@@ -167,8 +169,13 @@
   }
 
   /* ---- home ---- */
+  function focusedCardId() {
+    const a = document.activeElement, c = a && a.closest && a.closest('.card');
+    return c ? c.dataset.id : null;
+  }
   function renderHome() {
     const main = $('#main');
+    const prevId = LF.app && LF._wasPage === 'home' ? focusedCardId() : null;
     const movies = LF.movies;
     if (!movies.length) {
       main.innerHTML = emptyState('Add some video files to your movies folder, then refresh.');
@@ -193,7 +200,7 @@
     }
     window.scrollRow = function(btn, dir) {
       const row = btn.parentNode.querySelector('.row');
-      if (row) row.scrollBy({ left: dir * 680, behavior: 'smooth' });
+      if (row) row.scrollBy({ left: dir * 680, behavior: LF.app ? 'auto' : 'smooth' });
     };
     const genres = {};
     movies.forEach((m) => { if (m.genre) (genres[m.genre] = genres[m.genre] || []).push(m); });
@@ -202,7 +209,7 @@
     const folderRows = Object.entries(folders).sort((a, b) => b[1].length - a[1].length).slice(0, 3)
       .map(([f, ms]) => rowHtml(f, ms)).join('');
     const heroOv = '';
-    const heroPoster = hero.poster === 'ready' ? `url('/poster/${hero.id}?v=${hero.pv}')` : '';
+    const heroPoster = hero.poster === 'ready' && !LF.app ? `url('/poster/${hero.id}?v=${hero.pv}')` : '';   // TV: no blurred backdrop, it is too heavy
     main.innerHTML = `<div class="page">
       <div class="hero">
         ${heroPoster ? `<div class="hero-bg" style="background-image:${heroPoster}"></div>` : ''}
@@ -227,8 +234,12 @@
     settleImages(main);
     // TV remote: start with a visible focus ring on the main Play button (only if nothing else holds focus).
     if (LF.app) setTimeout(() => {
+      if (modalEl) return;      // never steal focus from an open dialog
       const a = document.activeElement;
-      if (!a || a === document.body) { const p = $('.hero .btn.primary'); if (p) p.focus({ preventScroll: true }); }
+      if (!a || a === document.body) {
+        const prev = prevId && $('.card[data-id="' + prevId + '"]');
+        const p = prev || $('.hero .btn.primary'); if (p) p.focus({ preventScroll: true });
+      }
     }, 60);
   }
   const posters = { infoCache: null };
@@ -283,6 +294,7 @@
   function renderBrowse(q) {
     if (q) { bstate = Object.assign({}, bstate, q); }
     const main = $('#main');
+    const prevId = LF.app && LF._wasPage === 'browse' ? focusedCardId() : null;
     const keepId = document.activeElement && /^f(Sort|Dir|Subs)$/.test(document.activeElement.id || '') ? document.activeElement.id : '';
     browseFiltered = applyBrowse(LF.movies);
     browseLoaded = 0;
@@ -319,8 +331,8 @@
     }
     if (keepId) { const k = $('#' + keepId); if (k) { k.focus({ preventScroll: true }); return; } }
     if (!document.body.classList.contains('pointer')) {
-      const first = $('#bGrid .card', main);
-      if (first) setTimeout(() => { if (document.activeElement !== sq()) first.focus({ preventScroll: true }); }, 80);
+      const first = (prevId && $('#bGrid .card[data-id="' + prevId + '"]', main)) || $('#bGrid .card', main);
+      if (first) setTimeout(() => { if (!modalEl && document.activeElement !== sq()) first.focus({ preventScroll: true }); }, 80);
     }
   }
   LF._browse = (p) => { bstate = Object.assign({}, bstate, p); LF._bs = bstate; if (page === 'browse') renderBrowse(); };
@@ -329,6 +341,7 @@
   /* ---- page rendering ---- */
   let page = '';
   function renderPage(kind, params) {
+    LF._wasPage = page;
     page = kind;
     LF._bs = bstate;
     $$('.tabs a').forEach((a) => a.classList.toggle('on', a.dataset.tab === kind));
@@ -349,7 +362,7 @@
     if (!m) { LF.toast('Movie not found.'); location.replace('#/'); return; }
     const html = `<div class="modal"><button class="m-close" type="button" aria-label="Close" onclick="LF.closeOverlay()"><svg class="ic"><use href="#i-close"/></svg></button>
       <div class="det">
-        <div class="poster">${m.poster === 'ready' ? `<img data-p="1" alt="" src="/poster/${m.id}?v=${m.pv}">` : `<div class="ph"><b>${esc(m.title)}</b></div>`}</div>
+        <div class="poster">${m.poster === 'ready' ? `<img data-p="1" alt="" decoding="async" src="${posterUrl(m, 420)}">` : `<div class="ph"><b>${esc(m.title)}</b></div>`}</div>
         <div>
           <h2>${esc(m.title)}</h2>
           <div class="meta">${m.year ? `<span>${m.year}</span><span class="dot"></span>` : ''}${m.genre ? `<span>${esc(m.genre)}</span><span class="dot"></span>` : ''}<span>${m.ext}</span>${m.dur ? `<span class="dot"></span><span>${LF.fmtTime(m.dur)}</span>` : ''}${m.subs ? `<span class="dot"></span><span>Subtitles</span>` : ''}</div>
@@ -368,7 +381,12 @@
     </div>`;
     const modal = openModal(html, { onClose: () => { if (LF.fromPage) {} } });
     settleImages(modal.el);
-    if (LF.app) setTimeout(() => { const pb = $('#dPlay', modal.el); if (pb) pb.focus({ preventScroll: true }); }, 30);
+    if (LF.app) {
+      // Focus Play immediately (a delayed focus left a gap in which the remote could act on the page behind).
+      const pb = $('#dPlay', modal.el);
+      if (pb) { pb.focus({ preventScroll: true }); modal.el._last = pb; }
+      requestAnimationFrame(() => { if (modalEl === modal.el && !modal.el.contains(document.activeElement) && pb) pb.focus({ preventScroll: true }); });
+    }
     // Load full details async
     LF.api('/api/movies/' + mid).then((d) => {
       const ovEl = $('#dOv', modal.el);
@@ -406,7 +424,7 @@
       </div>`;
       const modal = openModal(html);
       const chg = $('#sChange', modal.el);
-      if (chg) { chg.onclick = () => { try { window.LocalFlixTV.changeServer(); } catch { /* bridge missing */ } }; setTimeout(() => chg.focus({ preventScroll: true }), 30); }
+      if (chg) { chg.onclick = () => { try { window.LocalFlixTV.changeServer(); } catch { /* bridge missing */ } }; chg.focus({ preventScroll: true }); modal.el._last = chg; }
       const form = $('#sForm', modal.el); if (!form) return;
       form.onsubmit = async (e) => {
         e.preventDefault();
@@ -461,7 +479,7 @@
         res.slice(0, 6).forEach((m) => {
           sugg_items.push({ type: 'm', id: m.id });
           html += `<button class="sg" type="button" role="option" data-i="${sugg_items.length - 1}">
-            <div class="sg-p poster" style="aspect-ratio:auto;border-radius:5px;box-shadow:none;min-height:46px">${m.poster === 'ready' ? `<img data-p="1" alt="" src="/poster/${m.id}?v=${m.pv}" style="position:static;width:34px;height:50px;object-fit:cover">` : ''}</div>
+            <div class="sg-p poster" style="aspect-ratio:auto;border-radius:5px;box-shadow:none;min-height:46px">${m.poster === 'ready' ? `<img data-p="1" alt="" src="${posterUrl(m, 120)}" style="position:static;width:34px;height:50px;object-fit:cover">` : ''}</div>
             <div class="sg-txt"><div class="sg-t">${highlight(m.title, q)}</div><div class="sg-m">${esc([m.year, m.ext, m.subs ? 'Subtitles' : ''].filter(Boolean).join('  ·  '))}</div></div>
           </button>`;
         });
@@ -539,7 +557,7 @@
     return !!(el && el.closest('#bGrid, .row'));
   }
 
-  LF.moveFocus = function (dir, root) {
+  function genericMove(dir, root) {
     root = root || document;
     const cur = document.activeElement;
     const els = $$(FOCUSABLE, root).filter((e) => e !== cur && e.tabIndex !== -1 && visible(e));
@@ -572,17 +590,178 @@
       if (curInGrid && dir === 'up' && best === sq()) {
         const alt = els.filter((e) => isTopbarEl(e) && e !== sq() && e.getBoundingClientRect().bottom <= cy)
           .sort((a, b) => { const ar = a.getBoundingClientRect(), br = b.getBoundingClientRect(); return Math.abs(ar.left + ar.width / 2 - cx) - Math.abs(br.left + br.width / 2 - cx); })[0];
-        if (alt) { alt.focus({ preventScroll: true }); alt.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' }); return true; }
+        if (alt) { alt.focus({ preventScroll: true }); alt.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: LF.app ? 'auto' : 'smooth' }); return true; }
       }
-      best.focus({ preventScroll: true }); best.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' }); return true;
+      best.focus({ preventScroll: true }); best.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: LF.app ? 'auto' : 'smooth' }); return true;
     }
     return false;
+  }
+
+  /* ---- TV remote navigation (LF.app only) ----
+     The old code measured EVERY focusable element on EVERY key press and started a new smooth scroll each time,
+     which is why holding an arrow key stuttered. Now the TV app walks the page structure instead:
+       - a card's left/right neighbours are its siblings, up/down is the row above / below (O(1), no measuring)
+       - only the small "top zone" (navbar, hero buttons, browse toolbar) uses a distance search
+       - the navbar can ONLY be reached from that top zone, never from the cards or the middle of the page
+       - scrolling is one short animation that is re-aimed on every key press, so bursts never queue up      */
+  const centerX = (el) => { const r = el.getBoundingClientRect(); return r.left + r.width / 2; };
+  const isCard = (el) => !!(el && el.classList && el.classList.contains('card'));
+  const TOP_ZONE = '.topbar a[href],.topbar button,.topbar input,.hero .btn,.qtag button,.toolbar select,.toolbar button';
+  function nearestX(list, x) {
+    let best = null, bd = Infinity;
+    for (let i = 0; i < list.length; i++) { const d = Math.abs(centerX(list[i]) - x); if (d < bd) { bd = d; best = list[i]; } }
+    return best;
+  }
+
+  // one rAF loop animates every active scroll; a new target simply replaces the old one
+  const anims = []; let animRaf = 0;
+  const SCROLL_MS = 150;
+  function stepAnims(now) {
+    animRaf = 0;
+    for (let i = anims.length - 1; i >= 0; i--) {
+      const a = anims[i], p = Math.min(1, (now - a.t0) / SCROLL_MS), e = 1 - Math.pow(1 - p, 3);
+      a.el[a.prop] = a.from + (a.to - a.from) * e;
+      if (p >= 1) anims.splice(i, 1);
+    }
+    if (anims.length) animRaf = requestAnimationFrame(stepAnims);
+  }
+  function animScroll(el, prop, target) {
+    const max = prop === 'scrollTop' ? el.scrollHeight - el.clientHeight : el.scrollWidth - el.clientWidth;
+    target = Math.max(0, Math.min(max, Math.round(target)));
+    if (Math.abs(target - el[prop]) < 2) return;
+    let a = anims.find((x) => x.el === el && x.prop === prop);
+    if (!a) { a = { el, prop }; anims.push(a); }
+    a.from = el[prop]; a.to = target; a.t0 = performance.now();
+    if (!animRaf) animRaf = requestAnimationFrame(stepAnims);
+  }
+
+  // Keep the focused element inside the TV-safe part of the screen (cards are also scaled up when focused).
+  function tvReveal(el) {
+    const doc = document.scrollingElement || document.documentElement;
+    if (el.closest('.topbar,.hero,.qtag,.toolbar,.ph1')) { animScroll(doc, 'scrollTop', 0); return; }
+    const vh = window.innerHeight, bar = $('#topbar');
+    const topLimit = (bar ? bar.offsetHeight : 0) + 8, botLimit = vh - Math.round(vh * 0.05) - 8;
+    const row = el.closest('.row');
+    if (row) {
+      const rr = row.getBoundingClientRect(), r = el.getBoundingClientRect(), pad = 44;
+      if (r.left < rr.left + pad) animScroll(row, 'scrollLeft', row.scrollLeft - (rr.left + pad - r.left));
+      else if (r.right > rr.right - pad) animScroll(row, 'scrollLeft', row.scrollLeft + (r.right - (rr.right - pad)));
+    }
+    const r2 = el.getBoundingClientRect();
+    if (r2.top < topLimit || r2.bottom > botLimit) {
+      const ref = (row && el.closest('.sec')) || el, t = ref.getBoundingClientRect().top;
+      animScroll(doc, 'scrollTop', doc.scrollTop + t - topLimit - (row ? 8 : 22));
+    }
+  }
+  function tvFocus(el) {
+    if (!el) return false;
+    el.focus({ preventScroll: true });
+    tvReveal(el);
+    return true;
+  }
+
+  function gridCols(grid) {
+    const k = grid.children; if (!k.length) return 1;
+    const t = k[0].offsetTop; let c = 1;
+    while (c < k.length && k[c].offsetTop === t) c++;
+    return c;
+  }
+  // Browse loads its cards in pages; make sure the card we are about to step to exists.
+  function browseEnsure(n) {
+    const grid = $('#bGrid'); if (!grid) return;
+    while (browseLoaded < n && browseLoaded < browseFiltered.length) appendBrowseCards(grid, browseLoaded, Math.min(browseLoaded + PAGE_SIZE, browseFiltered.length));
+    if (browseLoaded >= browseFiltered.length) { const sn = $('#bSentinel'); if (sn) sn.hidden = true; if (browseObserver) browseObserver.disconnect(); }
+  }
+
+  function tvRowMove(dir, cur, row) {
+    if (dir === 'left') { const p = cur.previousElementSibling; if (isCard(p)) tvFocus(p); return true; }
+    if (dir === 'right') { const n = cur.nextElementSibling; if (isCard(n)) tvFocus(n); return true; }
+    const x = centerX(cur), step = dir === 'down' ? 'nextElementSibling' : 'previousElementSibling';
+    let s = cur.closest('.sec'); s = s && s[step];
+    while (s) {
+      const r = s.querySelector && s.querySelector('.row');
+      if (r && r.children.length) return tvFocus(nearestX(r.children, x));
+      s = s[step];
+    }
+    if (dir === 'up') return tvFocus(nearestX($$('.hero .btn'), x));   // first row -> hero buttons (the top section)
+    return true;                                                         // last row: stay
+  }
+
+  function tvGridMove(dir, cur, grid) {
+    const idx = Array.prototype.indexOf.call(grid.children, cur), cols = gridCols(grid), col = idx % cols;
+    if (dir === 'left') { if (col > 0) tvFocus(grid.children[idx - 1]); return true; }
+    if (dir === 'right') {
+      if (idx + 1 >= grid.children.length) browseEnsure(idx + 2);
+      if (col < cols - 1 && idx + 1 < grid.children.length) tvFocus(grid.children[idx + 1]);
+      return true;
+    }
+    if (dir === 'down') {
+      if (idx + cols >= grid.children.length) browseEnsure(idx + cols + 1);
+      const k = grid.children, len = k.length;
+      if (idx + cols < len) tvFocus(k[idx + cols]);
+      else if (Math.floor(idx / cols) < Math.floor((len - 1) / cols)) tvFocus(k[len - 1]);   // last row is shorter
+      else return true;
+      setTimeout(() => browseEnsure(idx + cols * 4), 250);                                  // load the next page ahead of time
+      return true;
+    }
+    if (idx - cols >= 0) return tvFocus(grid.children[idx - cols]);
+    return tvFocus(nearestX($$('.toolbar select,.toolbar button'), centerX(cur)));             // first grid row -> toolbar (top section)
+  }
+
+  // Distance search among a handful of elements only.
+  function pick(dir, cur, els) {
+    const cr = cur.getBoundingClientRect(), cx = cr.left + cr.width / 2, cy = cr.top + cr.height / 2;
+    let best = null, bs = Infinity;
+    for (const el of els) {
+      if (el === cur) continue;
+      const r = el.getBoundingClientRect(), dx = r.left + r.width / 2 - cx, dy = r.top + r.height / 2 - cy; let main, cross;
+      if (dir === 'right') { if (dx <= 4) continue; main = dx; cross = Math.abs(dy); }
+      else if (dir === 'left') { if (dx >= -4) continue; main = -dx; cross = Math.abs(dy); }
+      else if (dir === 'down') { if (dy <= 4) continue; main = dy; cross = Math.abs(dx); }
+      else { if (dy >= -4) continue; main = -dy; cross = Math.abs(dx); }
+      const overlap = (dir === 'left' || dir === 'right') ? !(r.bottom < cr.top || r.top > cr.bottom) : !(r.right < cr.left || r.left > cr.right);
+      const sc = main + cross * (overlap ? 1.5 : 5);
+      if (sc < bs) { bs = sc; best = el; }
+    }
+    return best;
+  }
+  function tvTopMove(dir, cur) {
+    const els = $$(TOP_ZONE).filter(visible);
+    if (dir === 'down') {   // the only way from the navbar / hero / toolbar into the page body
+      const grid = $('#bGrid');
+      if (grid && grid.children.length) { const n = gridCols(grid); for (let i = 0; i < n && i < grid.children.length; i++) els.push(grid.children[i]); }
+      else { const row = $('.sec .row'); if (row) for (let i = 0; i < row.children.length; i++) els.push(row.children[i]); }
+    }
+    return tvFocus(pick(dir, cur, els)) || true;
+  }
+
+  function tvMove(dir, root) {
+    if (root !== document) return genericMove(dir, root);   // dialogs: only a few buttons, plain search is fine
+    const cur = document.activeElement;
+    if (!cur || cur === document.body || !document.contains(cur)) {
+      return tvFocus($('.hero .btn.primary') || $('#bGrid .card') || $('.card') || $('.toolbar button'));
+    }
+    if (isCard(cur)) {
+      const par = cur.parentElement;
+      if (par.classList.contains('row')) return tvRowMove(dir, cur, par);
+      if (par.id === 'bGrid') return tvGridMove(dir, cur, par);
+    }
+    if (cur.closest('.topbar,.hero,.qtag,.toolbar')) return tvTopMove(dir, cur);
+    return genericMove(dir, root);
+  }
+
+  LF.moveFocus = function (dir, root) {
+    root = root || document;
+    return LF.app ? tvMove(dir, root) : genericMove(dir, root);
   };
   let pointerUsed = false;
   document.addEventListener('mousemove', () => { pointerUsed = true; document.body.classList.add('pointer'); }, { passive: true });
   const DIRS = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' };
+  let lastMoveAt = 0;
   document.addEventListener('keydown', (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
+    // TV: holding OK must not fire again on whatever opens under it (details dialog -> Play -> player).
+    if (LF.app && e.repeat && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); return; }
     if (LF.player && LF.player.active) { if (LF.player.onKey(e)) return; }
     const tag = e.target.tagName, typing = (tag === 'INPUT' && !/range|checkbox|button/.test(e.target.type)) || tag === 'TEXTAREA';
     if (e.key === 'Escape' || e.key === 'GoBack' || e.key === 'BrowserBack' || (e.key === 'Backspace' && !typing)) {
@@ -600,7 +779,14 @@
     if (tag === 'INPUT' && e.target.type === 'range' && (dir === 'left' || dir === 'right')) return;
     const root = modalEl || document;
     if (document.activeElement === document.body && !LF.tv && pointerUsed && !modalEl) return;
-    e.preventDefault(); LF.moveFocus(dir, root);
+    e.preventDefault();
+    if (LF.app) {
+      // Held arrow keys repeat faster than the TV can draw: take one step per ~90 ms and drop the rest (no backlog).
+      const t = performance.now();
+      if (e.repeat && t - lastMoveAt < 90) return;
+      lastMoveAt = t;
+    }
+    LF.moveFocus(dir, root);
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Tab' && modalEl) {
@@ -666,6 +852,14 @@
     }, true);
     // 3. The suggestion dropdown must never stay open over the page once focus has left the search box.
     sq().addEventListener('blur', closeSugg);
+    // 4. While a dialog (movie details / settings) is open, focus can never leave it. Before, a stray focus() or
+    //    key press could land on the navbar or the next section behind the dialog.
+    document.addEventListener('focusin', (e) => {
+      if (!modalEl) return;
+      if (modalEl.contains(e.target)) { modalEl._last = e.target; return; }
+      const back = (modalEl._last && modalEl.contains(modalEl._last) && modalEl._last) || $('#dPlay,#sChange,.btn,.inp,.m-close', modalEl);
+      if (back) back.focus({ preventScroll: true });
+    }, true);
   }
 
   /* ---- routing ---- */
@@ -698,7 +892,7 @@
           document.querySelectorAll(`.poster[data-id="${m.id}"]`).forEach((p) => {
             const img = p.querySelector('img[data-p]'); if (img) img.remove();
             const ph = p.querySelector('.ph'); if (ph) { ph.classList.remove('shim'); if (m.poster === 'ready') ph.innerHTML = ''; }
-            if (m.poster === 'ready') { const ni = document.createElement('img'); ni.dataset.p = '1'; ni.alt = ''; ni.src = `/poster/${m.id}?v=${m.pv}`; ni.addEventListener('load', () => ni.classList.add('ld')); p.insertBefore(ni, p.firstChild); }
+            if (m.poster === 'ready') { const ni = document.createElement('img'); ni.dataset.p = '1'; ni.alt = ''; ni.decoding = 'async'; ni.src = posterUrl(m); ni.addEventListener('load', () => ni.classList.add('ld')); p.insertBefore(ni, p.firstChild); }
           });
         });
       } catch { /* offline */ }

@@ -38,6 +38,29 @@ class Posters:
                 return p
         return None
 
+    def thumb(self, mid, width):
+        """Small cached copy of a poster (TV app). Falls back to the original when ffmpeg is missing or fails.
+
+        Local / embedded covers can be 1000+ px wide; decoding dozens of them is what makes a TV scroll badly.
+        """
+        src = self.path(mid)
+        if not src or not self.media.available:
+            return src
+        width = max(120, min(int(width), 800))
+        out = os.path.join(self.dir, f"{mid}.t{width}.jpg")
+        try:
+            if os.path.isfile(out) and os.path.getmtime(out) >= os.path.getmtime(src):
+                return out
+            tmp = out + ".tmp.jpg"
+            r = self.media.run([self.media.ffmpeg, "-y", "-v", "error", "-i", src, "-vf", f"scale={width}:-2",
+                                "-frames:v", "1", "-q:v", "5", tmp], 30)
+            if r.returncode == 0 and os.path.isfile(tmp) and os.path.getsize(tmp) > 300:
+                os.replace(tmp, out)
+                return out
+        except Exception:
+            pass
+        return src
+
     def state(self, m):
         i = self.meta.get(m["id"])
         if not i:
@@ -94,6 +117,12 @@ class Posters:
                 os.unlink(os.path.join(self.dir, f"{mid}.{e}"))
             except OSError:
                 pass
+        for f in os.listdir(self.dir):          # cached TV thumbnails of the old poster
+            if f.startswith(f"{mid}.t") and f.endswith(".jpg"):
+                try:
+                    os.unlink(os.path.join(self.dir, f))
+                except OSError:
+                    pass
         tmp = os.path.join(self.dir, f"{mid}.tmp")
         with open(tmp, "wb") as fh:
             fh.write(data)

@@ -3,8 +3,8 @@
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_focused="true">
         <shape android:shape="rectangle">
-            <stroke android:width="2dp" android:color="@color/white" />
-            <corners android:radius="6dp" />
+            <stroke android:width="3dp" android:color="#CCFFFFFF" />
+            <corners android:radius="10dp" />
         </shape>
     </item>
     <item>

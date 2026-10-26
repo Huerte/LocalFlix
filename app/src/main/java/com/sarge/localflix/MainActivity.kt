@@ -187,6 +187,7 @@ class MainActivity : FragmentActivity() {
         wv.isVerticalScrollBarEnabled = false
         wv.isHorizontalScrollBarEnabled = false
         wv.overScrollMode = View.OVER_SCROLL_NEVER
+        wv.setLayerType(View.LAYER_TYPE_HARDWARE, null)   // GPU compositing: much smoother focus zoom / scrolling on TVs
 
         wv.settings.apply {
             javaScriptEnabled = true

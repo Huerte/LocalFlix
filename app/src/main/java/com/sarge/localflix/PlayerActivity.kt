@@ -80,6 +80,10 @@ class PlayerActivity : FragmentActivity() {
     private var cues: List<Cue> = emptyList()
     private var cuesFor = -2
     private var cueJob: Job? = null
+    private var subSizePct = 100           // subtitle size in percent (Settings menu)
+
+    // ── playback speed ────────────────────────────────────────────────────────
+    private var speed = 1f
 
     // ── UI state ──────────────────────────────────────────────────────────────
     private var controlsOn = false
@@ -110,17 +114,23 @@ class PlayerActivity : FragmentActivity() {
             subChoice = req.subtitles.indexOfFirst { it.label == want }.let { if (it >= 0) it else 0 }
         }
 
+        speed = prefs.getFloat(KEY_SPEED, 1f)
+        subSizePct = prefs.getInt(KEY_SUB_SIZE, 100)
+
+        // Same title block as the web player: title, then "year · 1080p · MKV".
         b.titleText.text = req.title
+        b.subTitleText.text = listOfNotNull(
+            if (req.year > 0) req.year.toString() else null,
+            if (req.height > 0) "${req.height}p" else null,
+            req.ext.ifEmpty { null }
+        ).joinToString("  ·  ")
+        b.subTitleText.visibility = if (b.subTitleText.text.isEmpty()) View.GONE else View.VISIBLE
         b.bNext.visibility = if (req.nextId != null) View.VISIBLE else View.GONE
-        b.seekProgress.progressTintList = ColorStateList.valueOf(ContextCompat.getColor(this, R.color.accent))
-        b.seekProgress.progressBackgroundTintList = ColorStateList.valueOf(0x4DFFFFFF)
-        b.seekProgress.secondaryProgressTintList = ColorStateList.valueOf(0x66FFFFFF)
         b.playerView.subtitleView?.apply {
             setApplyEmbeddedStyles(false)
             setStyle(CaptionStyleCompat(Color.WHITE, Color.TRANSPARENT, Color.TRANSPARENT, CaptionStyleCompat.EDGE_TYPE_OUTLINE, Color.BLACK, null))
-            setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * 1.15f)
-            setBottomPaddingFraction(0.08f)
         }
+        applySubtitleLook()
 
         b.bPlay.setOnClickListener { togglePlay() }
         b.bBack10.setOnClickListener { seekBy(-10_000) }
@@ -128,6 +138,8 @@ class PlayerActivity : FragmentActivity() {
         b.bSubs.setOnClickListener { openSubtitleMenu() }
         b.bAudio.setOnClickListener { openAudioMenu() }
         b.bNext.setOnClickListener { finishWithResult(req.nextId) }
+        b.bSet.setOnClickListener { openSettingsMenu() }
+        b.btnBack.setOnClickListener { finishWithResult(null) }
     }
 
     override fun onStart() {
@@ -221,6 +233,7 @@ class PlayerActivity : FragmentActivity() {
             .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
         appliedSub = -1
 
+        exo.setPlaybackSpeed(speed)
         exo.addListener(listener)
         exo.playWhenReady = wantPlay
         exo.prepare()
@@ -487,6 +500,28 @@ class PlayerActivity : FragmentActivity() {
         openMenu("Audio", items, b.bAudio)
     }
 
+    /** The web player's "Playback settings": speed and subtitle size. */
+    private fun openSettingsMenu() {
+        val items = ArrayList<MenuEntry>()
+        for (x in floatArrayOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)) {
+            val name = if (x == 1f) "Speed:  Normal" else "Speed:  ${x}x"
+            items.add(MenuEntry(name, speed == x) {
+                speed = x
+                prefs.edit().putFloat(KEY_SPEED, x).apply()
+                player?.setPlaybackSpeed(x)
+                showMsg(if (x == 1f) "Normal speed" else "Speed ${x}x")
+            })
+        }
+        for ((label, pct) in listOf("Small" to 80, "Normal" to 100, "Large" to 130, "Huge" to 170)) {
+            items.add(MenuEntry("Subtitle size:  $label", subSizePct == pct) {
+                subSizePct = pct
+                prefs.edit().putInt(KEY_SUB_SIZE, pct).apply()
+                applySubtitleLook()
+            })
+        }
+        openMenu("Playback", items, b.bSet)
+    }
+
     private fun channelsText(ch: Int) = when { ch <= 0 -> ""; ch == 1 -> "Mono"; ch == 2 -> "Stereo"; ch == 6 -> "5.1"; ch == 8 -> "7.1"; else -> "$ch ch" }
 
     private fun openMenu(title: String, items: List<MenuEntry>, opener: View) {
@@ -501,22 +536,24 @@ class PlayerActivity : FragmentActivity() {
         }
         for (e in items) {
             val btn = Button(this).apply {
-                text = (if (e.checked) "●  " else "     ") + e.label
+                text = (if (e.checked) "✓    " else "       ") + e.label
                 isAllCaps = false
                 gravity = Gravity.START or Gravity.CENTER_VERTICAL
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
-                setTextColor(ContextCompat.getColorStateList(this@PlayerActivity, R.color.btn_text))
-                setBackgroundResource(R.drawable.bg_btn)
+                setTextColor(if (e.checked) ContextCompat.getColor(this@PlayerActivity, R.color.white) else 0xCCFFFFFF.toInt())
+                setBackgroundResource(R.drawable.bg_menu_item)
                 stateListAnimator = null
-                minimumHeight = dp(48)
+                minimumHeight = dp(50)
+                setPadding(dp(14), 0, dp(14), 0)
                 setOnClickListener { closeMenu(); e.onPick() }
             }
-            b.menuList.addView(btn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(6) })
+            b.menuList.addView(btn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(4) })
             if (e.checked || focusTarget == null) focusTarget = btn   // focus the current choice, else the first row
         }
         menuOn = true
         ui.removeCallbacks(hideRunnable)
         b.menuPanel.visibility = View.VISIBLE
+        updateBigPlay()
         focusTarget?.requestFocus()
     }
 
@@ -524,6 +561,7 @@ class PlayerActivity : FragmentActivity() {
         menuOn = false
         b.menuPanel.visibility = View.GONE
         menuOpener?.requestFocus()
+        updateBigPlay()
         scheduleHide()
     }
 
@@ -534,6 +572,7 @@ class PlayerActivity : FragmentActivity() {
         hideControls()
         menuOn = false; b.menuPanel.visibility = View.GONE
         dialogOn = true
+        b.bigPlay.visibility = View.GONE
         dialogCancel = onCancel
         b.dialogTitle.text = title
         b.dialogText.text = text
@@ -562,6 +601,7 @@ class PlayerActivity : FragmentActivity() {
     private fun showControls(focus: View?) {
         controlsOn = true
         b.controls.visibility = View.VISIBLE
+        applySubtitleLook()
         if (focus != null) focus.requestFocus()
         scheduleHide()
         updateUi()
@@ -571,6 +611,7 @@ class PlayerActivity : FragmentActivity() {
         controlsOn = false
         ui.removeCallbacks(hideRunnable)
         b.controls.visibility = View.GONE        // a hidden view loses focus automatically
+        applySubtitleLook()
     }
 
     private fun scheduleHide() {
@@ -588,7 +629,29 @@ class PlayerActivity : FragmentActivity() {
 
     private fun updatePlayButton() {
         val playing = player?.playWhenReady == true && player?.playbackState != Player.STATE_ENDED
-        b.bPlay.text = if (playing) "Pause" else "Play"
+        b.bPlay.setImageResource(if (playing) R.drawable.ic_pause else R.drawable.ic_play)
+        b.bPlay.contentDescription = if (playing) "Pause" else "Play"
+        updateBigPlay()
+    }
+
+    /** The big centre play button of the web player: only while paused and nothing else is on top. */
+    private fun updateBigPlay() {
+        val exo = player
+        val paused = exo != null && !exo.playWhenReady && exo.playbackState == Player.STATE_READY
+        b.bigPlay.visibility = if (paused && !menuOn && !dialogOn) View.VISIBLE else View.GONE
+    }
+
+    // ── subtitle look / position ──────────────────────────────────────────────
+
+    /** Size from the Settings menu; the lines move up while the controls are on screen (like the web player). */
+    private fun applySubtitleLook() {
+        val f = subSizePct / 100f
+        b.playerView.subtitleView?.apply {
+            setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * 1.15f * f)
+            setBottomPaddingFraction(if (controlsOn) 0.24f else 0.08f)
+        }
+        b.subText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 26f * f)
+        b.subText.translationY = if (controlsOn) -dp(120).toFloat() else 0f
     }
 
     /** Runs 4x a second: seek bar, time text, converted-stream subtitles. */
@@ -608,6 +671,12 @@ class PlayerActivity : FragmentActivity() {
             val buf = player?.bufferedPosition ?: 0L
             b.seekProgress.secondaryProgress = if (dur > 0) ((offsetMs + buf) * 1000 / dur).toInt().coerceIn(0, 1000) else 0
             b.timeText.text = if (dur > 0) "${fmt(pos)} / ${fmt(dur)}" else fmt(pos)
+            // The white dot of the web seek bar: only while the bar has focus.
+            val th = b.seekThumb
+            if (b.seekBar.hasFocus() && b.seekProgress.width > 0) {
+                th.visibility = View.VISIBLE
+                th.translationX = b.seekProgress.width * (b.seekProgress.progress / 1000f) - th.width / 2f
+            } else if (th.visibility != View.INVISIBLE) th.visibility = View.INVISIBLE
         }
         drawCue()
     }
@@ -664,14 +733,18 @@ class PlayerActivity : FragmentActivity() {
 
         // Controls visible
         if (down && (isDir || isOk)) scheduleHide()
-        if (b.seekBar.hasFocus()) {
+        val f = currentFocus
+        if (f === b.seekBar) {
             if (k == KeyEvent.KEYCODE_DPAD_LEFT || k == KeyEvent.KEYCODE_DPAD_RIGHT) {
                 if (down) seekStep(if (k == KeyEvent.KEYCODE_DPAD_LEFT) -1 else 1, e.repeatCount)
                 return true
             }
-            if (k == KeyEvent.KEYCODE_DPAD_UP) return true          // nothing above: do not let focus escape
             if (isOk) { if (down && e.repeatCount == 0) togglePlay(); return true }
-        } else if (k == KeyEvent.KEYCODE_DPAD_DOWN && currentFocus?.parent === b.bPlay.parent) {
+            // Up -> back button, Down -> play button: the layout's nextFocus attributes do that
+        } else if (f === b.btnBack) {
+            if (k == KeyEvent.KEYCODE_DPAD_LEFT || k == KeyEvent.KEYCODE_DPAD_RIGHT || k == KeyEvent.KEYCODE_DPAD_UP) return true
+            if (isOk && e.repeatCount > 0) return true               // a held OK must not close the player twice
+        } else if (f != null && k == KeyEvent.KEYCODE_DPAD_DOWN) {
             return true                                              // button row is the bottom: nothing below
         }
         return super.dispatchKeyEvent(e)
@@ -697,5 +770,7 @@ class PlayerActivity : FragmentActivity() {
         private const val PREFS = "localflix_player"
         private const val KEY_SUBS_ON = "subs_on"
         private const val KEY_SUB_LABEL = "sub_label"
+        private const val KEY_SPEED = "speed"
+        private const val KEY_SUB_SIZE = "sub_size"
     }
 }

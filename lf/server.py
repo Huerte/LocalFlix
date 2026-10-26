@@ -264,7 +264,9 @@ def create_app():
 
     @app.route("/poster/<mid>")
     def poster(mid):
-        p = posters.path(re.sub(r"[^0-9a-f]", "", mid))
+        mid = re.sub(r"[^0-9a-f]", "", mid)
+        w = request.args.get("w", type=int)
+        p = posters.thumb(mid, w) if w else posters.path(mid)
         if not p:
             abort(404)
         r = send_file(p, conditional=True, max_age=86400)

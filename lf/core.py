@@ -7,6 +7,7 @@ import os
 import re
 import threading
 import time
+import unicodedata
 
 VERSION = "2.0.0"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -166,6 +167,171 @@ def human_size(b: int) -> str:
     return str(b)
 
 
+# --------------------------------------------------------------------------- categories
+# A top-level folder inside the movies folder becomes a category. Folder names that mean the same thing
+# ("Horror", "Horrors", "Horror movies", "horror list", "HorrorMovies") are merged into one category.
+OTHER_KEY = "other"
+OTHER_LABEL = "Other"
+CAT_NOISE = {
+    "movie", "movies", "film", "films", "flick", "flicks", "cinema", "cinemas", "video", "videos", "vid", "vids",
+    "list", "lists", "collection", "collections", "pack", "packs", "folder", "folders", "file", "files",
+    "library", "libraries", "genre", "genres", "category", "categories", "title", "titles", "watchlist",
+    "hd", "fhd", "uhd", "4k", "8k", "2160p", "1080p", "720p", "480p", "bluray", "brrip", "bdrip", "webrip", "hdrip",
+    "dvdrip", "x264", "x265", "hevc",
+}
+CAT_STOP = {"the", "a", "an", "of", "my", "all", "and"}   # ignored when comparing names, kept in the label
+SKIP_DIRS = {"@eadir", "#recycle", "system volume information", "lost+found"}
+_CAMEL = re.compile(r"(?<=[a-z])(?=[A-Z])")
+_WORD = re.compile(r"[^\W_]+")
+_EDGE = " \t_-.,;:&+/\\"
+
+
+def skip_dir(name: str) -> bool:
+    """Hidden and system folders (.thumbnails, $RECYCLE.BIN, @eaDir ...) never hold library content."""
+    return name.startswith((".", "$")) or name.lower() in SKIP_DIRS
+
+
+def _fold(text: str) -> str:
+    """Lower-case and strip Latin accents (so 'Séries' == 'series') without touching other scripts."""
+    out = []
+    for ch in unicodedata.normalize("NFKC", text):
+        d = unicodedata.normalize("NFD", ch)
+        if len(d) > 1 and ord(d[0]) < 128 and all(unicodedata.combining(c) for c in d[1:]):
+            out.append(d[0])
+        else:
+            out.append(ch)
+    return "".join(out).casefold()
+
+
+def _stem(tok: str) -> str:
+    """Very small plural stemmer. It only has to be consistent: horrors/horror, comedies/comedy, dramas/drama."""
+    if len(tok) <= 3 or not (tok.isascii() and tok.isalpha()):
+        return tok
+    if tok.endswith("ies") and len(tok) > 4:
+        return tok[:-3] + "y"
+    if tok.endswith(("sses", "ches", "shes", "xes")):
+        return tok[:-2]
+    if tok.endswith("s") and not tok.endswith(("ss", "us", "is")):
+        return tok[:-1]
+    return tok
+
+
+_NOISE_STEMS = {_stem(w) for w in CAT_NOISE}
+
+
+def _is_noise(tok: str, stop: bool = True) -> bool:
+    if stop and tok in CAT_STOP:
+        return True
+    return tok in CAT_NOISE or _stem(tok) in _NOISE_STEMS
+
+
+def _split_words(name: str):
+    return _WORD.findall(_CAMEL.sub(" ", name.replace("'", "").replace("\u2019", "")))
+
+
+def category_key(name: str) -> str:
+    """Normalised identity of a folder name; folders with the same key share one category."""
+    toks = [_fold(w) for w in _split_words(name)]
+    core = [t for t in toks if not _is_noise(t)] or toks
+    stems = sorted({_stem(t) for t in core})
+    return " ".join(stems) or _fold(name).strip() or "folder"
+
+
+def _title_case(text: str) -> str:
+    letters = [c for c in text if c.isalpha()]
+    if not letters:
+        return text
+    lower_only = not any(c.isupper() for c in letters)
+    upper_only = not any(c.islower() for c in letters)
+    if lower_only or (upper_only and len(letters) > 4):
+        text = text.lower() if upper_only else text
+        return re.sub(r"(^|[\s\-/&(])([^\W\d_])", lambda m: m.group(1) + m.group(2).upper(), text)
+    return text
+
+
+def category_label(name: str) -> str:
+    """Readable label for one folder name: noise words dropped ('Horror movies' -> 'Horror'), tidy casing."""
+    s = _CAMEL.sub(" ", name.replace("_", " "))
+    kept = _WORD.sub(lambda mo: "" if _is_noise(_fold(mo.group(0)), stop=False) else mo.group(0), s)
+    kept = re.sub(r"\s+", " ", kept).strip(_EDGE)
+    kept = kept or re.sub(r"\s+", " ", name.replace("_", " ")).strip(_EDGE) or name.strip() or "Folder"
+    return _title_case(kept)
+
+
+def _within_one(a: str, b: str) -> bool:
+    """True when two strings differ by at most one insertion, deletion, substitution or adjacent swap."""
+    if a == b:
+        return True
+    if abs(len(a) - len(b)) > 1:
+        return False
+    if len(a) == len(b):
+        diff = [i for i in range(len(a)) if a[i] != b[i]]
+        if len(diff) == 1:
+            return True
+        return len(diff) == 2 and diff[1] == diff[0] + 1 and a[diff[0]] == b[diff[1]] and a[diff[1]] == b[diff[0]]
+    short, long_ = (a, b) if len(a) < len(b) else (b, a)
+    i = 0
+    while i < len(short) and short[i] == long_[i]:
+        i += 1
+    return short[i:] == long_[i + 1:]
+
+
+def _typo_twin(a: str, b: str) -> bool:
+    """Typo tolerance for long single-word keys only ('documentry' ~ 'documentary'). Never for names with
+    digits or several words, so 'Toy Story 2' / 'Toy Story 3' or 'Rocky II' / 'Rocky III' are never merged."""
+    return (len(a) >= 7 and len(b) >= 7 and a.isalpha() and b.isalpha() and a.isascii() and b.isascii()
+            and a[0] == b[0] and _within_one(a, b))
+
+
+def assign_categories(movies):
+    """Give every movie 'cat' (stable id) and 'category' (display label), from its top-level folder.
+
+    Movies directly inside the movies folder are the 'other' category. Top-level folders whose names are close
+    to each other are merged into one category; a folder literally called Other/Others joins the same one.
+    """
+    per_folder = {}                                   # real top-level folder name -> movie count
+    for m in movies:
+        top = m["folder"].split("/", 1)[0] if m["folder"] else ""
+        m["_top"] = top
+        if top:
+            per_folder[top] = per_folder.get(top, 0) + 1
+    groups = {}                                       # key -> {"own": {folder name: movies}, "count": n}
+    for name, n in per_folder.items():
+        g = groups.setdefault(category_key(name), {"own": {}, "count": 0})
+        g["own"][name] = n
+        g["count"] += n
+    root_count = sum(1 for m in movies if not m["_top"])
+    if root_count:
+        g = groups.setdefault(OTHER_KEY, {"own": {}, "count": 0})
+        g["count"] += root_count
+    # merge typo twins into the biggest group (no chaining: every merge compares against a kept group)
+    kept, alias = [], {}
+    for key in sorted(groups, key=lambda k: (-groups[k]["count"], k)):
+        twin = next((k for k in kept if _typo_twin(key, k)), None)
+        if twin is None:
+            kept.append(key)
+            alias[key] = key
+        else:
+            alias[key] = twin
+            groups[twin]["count"] += groups[key]["count"]
+    labels = {}
+    for key in kept:
+        if key == OTHER_KEY:
+            labels[key] = OTHER_LABEL
+            continue
+        cands = {}
+        for name, n in groups[key]["own"].items():      # label comes from the group's own folders, not typo twins
+            lab = category_label(name)
+            cands[lab] = cands.get(lab, 0) + n
+        labels[key] = min(cands, key=lambda lab: (len(lab), -cands[lab], lab.casefold(), lab))
+    for m in movies:
+        top = m.pop("_top")
+        key = alias[category_key(top)] if top else OTHER_KEY
+        m["cat"] = key
+        m["category"] = labels[key]
+    return movies
+
+
 # --------------------------------------------------------------------------- library
 def mid_for(rel: str) -> str:
     return hashlib.sha1(rel.lower().encode("utf-8", "replace")).hexdigest()[:12]
@@ -199,6 +365,7 @@ class Library:
                     if any(nroot == d or nroot.startswith(d + os.sep) for d in sub_dirs):
                         dirs[:] = []
                         continue
+                    dirs[:] = [d for d in dirs if not skip_dir(d)]
                     for fname in files:
                         stem, ext = os.path.splitext(fname)
                         if ext.lower() not in VIDEO_EXTS:
@@ -217,6 +384,7 @@ class Library:
                             "full": full, "ext": ext[1:].upper(), "size": st.st_size, "size_str": human_size(st.st_size),
                             "folder": folder, "added": added_time(st), "mtime": int(st.st_mtime),
                         })
+            assign_categories(movies)
             self.subs.rebuild(movies)
             for m in movies:
                 m["subs"] = len(self.subs.match(m))

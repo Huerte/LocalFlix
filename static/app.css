@@ -233,6 +233,7 @@ body:not(.pointer) .card:focus-visible .poster{box-shadow:var(--ring-card)}
   background-repeat:no-repeat;background-position:right 10px center;
   cursor:pointer;transition:background-color .12s;
 }
+.tb-cat{max-width:220px;text-overflow:ellipsis}
 .tb-select:hover{background-color:var(--surface3)}
 .tb-select:focus-visible{outline:none;box-shadow:var(--ring)}
 .tb-btn{
@@ -244,6 +245,8 @@ body:not(.pointer) .card:focus-visible .poster{box-shadow:var(--ring-card)}
 .tb-btn:focus-visible{outline:none;box-shadow:var(--ring)}
 .tb-btn svg.ic{width:16px;height:16px}
 .tb-btn.on{background:rgba(229,9,20,.15);border-color:rgba(229,9,20,.5);color:#ff8a8e}
+.cat-more{margin:8px 0 32px;display:flex;justify-content:center}
+.qtags{display:flex;gap:8px;flex-wrap:wrap}
 .qtag{display:inline-flex;align-items:center;gap:8px;background:var(--surface3);border-radius:999px;padding:6px 8px 6px 14px;font-size:.88rem}
 .qtag button{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;color:var(--muted);transition:background .12s}
 .qtag button:hover{background:var(--surface4);color:#fff}
@@ -550,6 +553,8 @@ html.lftv .topbar{backdrop-filter:none;-webkit-backdrop-filter:none;background:r
   .grid{gap:16px 10px}
   .toolbar{gap:6px}
   .tb-select,.tb-btn{font-size:.82rem;height:36px}
+  .tb-cat{max-width:100%}
+  .tb-sep{display:none}
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 

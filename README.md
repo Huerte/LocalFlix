@@ -134,6 +134,23 @@ C:\Users\YourName\Videos\Movies\
 
 **Subtitle folder:** LocalFlix automatically checks for a `subtitle` subfolder inside your movies folder. You can also set a different path in the Settings screen.
 
+**Categories (automatic):** every folder directly inside your movies folder becomes a category. It shows up as its own row on the Home page and in the **Category** filter on the Browse page. Movies that sit loose in the movies folder are put in **Other**. Nothing to configure, it follows your folders:
+
+```
+Movies\
+├── Heat.mkv                      -> Other
+├── Horror\Saw (2004).mp4        -> Horror
+├── Horrors\The Ring.mp4         -> Horror   (same category, names are close)
+├── Horror movies\Hereditary.mp4 -> Horror
+├── horror list\Midsommar.mp4    -> Horror
+└── Comedy\Superbad.mp4          -> Comedy
+```
+
+- Folder names that mean the same thing are merged: upper/lower case, plural (`Horrors`), extra words like `movies`, `films`, `list`, `collection`, `pack`, and spelling like `Sci-Fi` / `SciFi` / `sci_fi`. Names that differ by a number (`Toy Story 2`, `Toy Story 3`) are never merged.
+- Only the first folder level counts: `Horror\Slashers\Scream.mp4` is in **Horror**.
+- Folders without a video file do not create a category. Hidden/system folders (`.something`, `$RECYCLE.BIN`, `@eaDir`) are ignored.
+- A category link can be bookmarked: `http://<ip>:8080/#/browse?cat=horror`.
+
 **File naming tips:**
 - Titles in brackets like `[Rec]` are handled correctly — the title shows as **Rec**
 - Year in the filename (`Inception.2010` or `Inception (2010)`) sets the year tag

@@ -113,7 +113,7 @@ def create_app():
         info = posters.info(m["id"])
         return {"id": m["id"], "name": m["name"], "title": m["title"], "year": m["year"] or _int(info.get("year_online")),
                 "path": m["path"], "ext": m["ext"], "size": m["size"], "size_str": m["size_str"], "folder": m["folder"],
-                "added": m["added"], "poster": st, "pv": ver, "subs": m.get("subs", 0), "dur": info.get("dur"),
+                "cat": m["cat"], "category": m["category"], "added": m["added"], "poster": st, "pv": ver, "subs": m.get("subs", 0), "dur": info.get("dur"),
                 "genre": info.get("genre", "")}
 
     def _int(v):

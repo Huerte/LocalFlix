@@ -111,9 +111,32 @@
   const norm = (s) => s.toLowerCase().replace(/[''`]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
   const sortKey = (s) => s.replace(/^(the|a|an)\s+/i, '').toLowerCase().replace(/(\d+)/g, (m) => m.padStart(6, '0'));
   function prep(list) {
-    list.forEach((m) => { m._k = sortKey(m.title); m._tn = norm(m.title); m._tok = norm([m.title, m.year, m.folder].join(' ')).split(/\s+/); });
+    list.forEach((m) => {
+      m._k = sortKey(m.title); m._tn = norm(m.title);
+      // "other" is only the label for loose files; it must not make every such movie match the word "other".
+      m._tok = norm([m.title, m.year, m.folder, m.cat && m.cat !== 'other' ? m.category : ''].join(' ')).split(/\s+/);
+    });
     return list;
   }
+
+  /* ---- categories (top-level folders of the movies folder, merged by the server; loose files are "Other") ---- */
+  let catMemo = { src: null, list: [] };
+  LF.categories = function () {
+    if (catMemo.src === LF.movies) return catMemo.list;
+    const map = new Map();
+    (LF.movies || []).forEach((m) => {
+      const id = m.cat || 'other';
+      let c = map.get(id);
+      if (!c) { c = { id, label: m.category || 'Other', count: 0 }; map.set(id, c); }
+      c.count++;
+    });
+    const list = Array.from(map.values()).sort((a, b) => (a.id === 'other') - (b.id === 'other')
+      || a.label.localeCompare(b.label, undefined, { sensitivity: 'base', numeric: true }));
+    catMemo = { src: LF.movies, list };
+    return list;
+  };
+  const catOf = (m) => m.cat || 'other';
+  const catHref = (id) => '#/browse?cat=' + encodeURIComponent(id);
 
   /* ---- search ---- */
   const norm2 = (s) => norm(s).split(/\s+/).filter(Boolean);
@@ -224,12 +247,14 @@
               <a class="btn ghost" href="#/movie/${hero.id}">More info</a>`;
     const info = LF.info || {};
     const heroMeta = posters.infoCache ? posters.infoCache[hero.id] : {};
-    function rowHtml(title, list, limit = 18) {
+    let rowSeq = 0;
+    function rowHtml(title, list, limit = 18, seeAll = '') {
       const items = list.slice(0, limit);
       if (!items.length) return '';
-      return `<section class="sec" aria-labelledby="r-${title.replace(/\s/g,'')}">
-        <div class="sec-h"><h2 id="r-${title.replace(/\s/g,'')}">${esc(title)}</h2></div>
-        <div class="row-wrap"><div class="row" id="row-${title.replace(/\s/g,'')}">
+      const rid = 'r' + (rowSeq++);   // unique and always a valid id, whatever the folder is called
+      return `<section class="sec" aria-labelledby="${rid}">
+        <div class="sec-h"><h2 id="${rid}">${esc(title)}</h2>${seeAll ? `<a href="${seeAll}" aria-label="See all ${list.length} in ${esc(title)}">See all ${list.length}</a>` : ''}</div>
+        <div class="row-wrap"><div class="row" id="row-${rid}">
           ${items.map(card).join('')}
         </div>
         <button class="row-nav l" type="button" aria-label="Scroll left" onclick="scrollRow(this,-1)"><svg class="ic"><use href="#i-chev"/></svg></button>
@@ -240,12 +265,18 @@
       const row = btn.parentNode.querySelector('.row');
       if (row) row.scrollBy({ left: dir * 680, behavior: LF.app ? 'auto' : 'smooth' });
     };
-    const genres = {};
-    movies.forEach((m) => { if (m.genre) (genres[m.genre] = genres[m.genre] || []).push(m); });
-    const folders = {};
-    movies.forEach((m) => { if (m.folder) (folders[m.folder] = folders[m.folder] || []).push(m); });
-    const folderRows = Object.entries(folders).sort((a, b) => b[1].length - a[1].length).slice(0, 3)
-      .map(([f, ms]) => rowHtml(f, ms)).join('');
+    // One section per category. Only worth showing when the library actually has more than one category.
+    const HOME_CAT_ROWS = 30;
+    const allCats = LF.categories();
+    let catRows = '', catMore = '';
+    if (allCats.length > 1) {
+      const shown = allCats.slice().sort((a, b) => b.count - a.count).slice(0, HOME_CAT_ROWS)
+        .sort((a, b) => allCats.indexOf(a) - allCats.indexOf(b));
+      const byCat = new Map(shown.map((c) => [c.id, []]));
+      movies.forEach((m) => { const l = byCat.get(catOf(m)); if (l) l.push(m); });
+      catRows = shown.map((c) => rowHtml(c.label, byCat.get(c.id).sort((a, b) => a._k.localeCompare(b._k)), 18, catHref(c.id))).join('');
+      if (allCats.length > shown.length) catMore = `<div class="cat-more"><a class="btn ghost" href="#/browse">${allCats.length - shown.length} more categories in Browse</a></div>`;
+    }
     const heroOv = '';
     const heroPoster = hero.poster === 'ready' && !LF.app ? `url('/poster/${hero.id}?v=${hero.pv}')` : '';   // TV: no blurred backdrop, it is too heavy
     main.innerHTML = `<div class="page">
@@ -267,7 +298,7 @@
       ${rowHtml('Continue Watching', LF.progress.resumable().filter((id) => id !== hero.id).map(byId).filter(Boolean), 12)}
       ${rowHtml('Recently Added', recent30, 16)}
       ${rowHtml('All Movies', movies.slice().sort((a, b) => a._k.localeCompare(b._k)), 24)}
-      ${folderRows}
+      ${catRows}${catMore}
     </div>`;
     settleImages(main);
     // TV remote: start with a visible focus ring on the main Play button (only if nothing else holds focus).
@@ -283,11 +314,34 @@
   const posters = { infoCache: null };
 
   /* ---- browse ---- */
-  let bstate = { q: '', sort: 'name', dir: 'asc', subs: false };
-  function applyBrowse(movies) {
+  let bstate = { q: '', sort: 'name', dir: 'asc', subs: false, cat: '' };
+  // Search + subtitle filters. The category counts in the filter are taken from this list.
+  function baseFilter(movies) {
     let list = movies.slice();
     if (bstate.q) list = LF.searchMovies(bstate.q);
     if (bstate.subs) list = list.filter((m) => m.subs > 0);
+    return list;
+  }
+  // A category that no longer exists (folder renamed or removed, stale link) must never hide the whole library.
+  function validCat() {
+    if (bstate.cat && !LF.categories().some((c) => c.id === bstate.cat)) { bstate.cat = ''; syncCatUrl(); }
+  }
+  // Keep ?cat= in the address bar equal to the chosen category, without adding history entries or re-routing.
+  function syncCatUrl() {
+    try {
+      if (location.hash.indexOf('#/browse') !== 0) return;
+      const h = location.hash.slice(1), qi = h.indexOf('?');
+      const path = qi < 0 ? h : h.slice(0, qi), qs = new URLSearchParams(qi < 0 ? '' : h.slice(qi + 1));
+      if (bstate.cat) qs.set('cat', bstate.cat); else qs.delete('cat');
+      const str = qs.toString(), nh = path + (str ? '?' + str : '');
+      if (nh === h) return;
+      history.replaceState(history.state, '', '#' + nh);
+      LF.pageHash = nh;
+    } catch { /* the filter still works without the URL */ }
+  }
+  function applyBrowse(movies) {
+    let list = baseFilter(movies);
+    if (bstate.cat) list = list.filter((m) => catOf(m) === bstate.cat);
     list.sort((a, b) => {
       let v = 0;
       if (bstate.sort === 'name') v = a._k.localeCompare(b._k);
@@ -333,16 +387,27 @@
     if (q) { bstate = Object.assign({}, bstate, q); }
     const main = $('#main');
     const prevId = LF.app && LF._wasPage === 'browse' ? focusedCardId() : null;
-    const keepId = document.activeElement && /^f(Sort|Dir|Subs)$/.test(document.activeElement.id || '') ? document.activeElement.id : '';
+    const keepId = document.activeElement && /^f(Sort|Dir|Subs|Cat)$/.test(document.activeElement.id || '') ? document.activeElement.id : '';
+    validCat();
     browseFiltered = applyBrowse(LF.movies);
+    const cats = LF.categories();
+    const catCounts = {};
+    baseFilter(LF.movies).forEach((m) => { const c = catOf(m); catCounts[c] = (catCounts[c] || 0) + 1; });
+    const curCat = cats.find((c) => c.id === bstate.cat);
     browseLoaded = 0;
     const dirIcon = bstate.dir === 'asc' ? '#i-up' : '#i-down';
     // The label follows the chosen sort: A to Z for names, oldest/newest for year and date, smallest/largest for size.
     const dirLabels = { name: ['A to Z', 'Z to A'], added: ['Oldest first', 'Newest first'], year: ['Oldest first', 'Newest first'], size: ['Smallest first', 'Largest first'] };
     const dirLabel = (dirLabels[bstate.sort] || dirLabels.name)[bstate.dir === 'asc' ? 0 : 1];
     const qHtml = bstate.q ? `<span class="qtag">"${esc(bstate.q)}" <button type="button" aria-label="Clear search" onclick="LF._browse({q:''})"><svg class="ic"><use href="#i-close"/></svg></button></span>` : '';
+    const cHtml = curCat ? `<span class="qtag">${esc(curCat.label)} <button type="button" aria-label="Clear category filter" onclick="LF._browse({cat:''})"><svg class="ic"><use href="#i-close"/></svg></button></span>` : '';
+    const catSel = cats.length > 1 ? `<span class="tb-lbl">Category:</span>
+        <select id="fCat" class="tb-select tb-cat" aria-label="Filter by category" onchange="LF._browse({cat:this.value})">
+          <option value=""${bstate.cat ? '' : ' selected'}>All categories (${baseFilter(LF.movies).length})</option>
+          ${cats.map((c) => `<option value="${esc(c.id)}"${bstate.cat === c.id ? ' selected' : ''}>${esc(c.label)} (${catCounts[c.id] || 0})</option>`).join('')}
+        </select>` : '';
     main.innerHTML = `<div class="page">
-      <div class="ph1"><h1>Browse <span class="count">(${browseFiltered.length})</span></h1>${qHtml}</div>
+      <div class="ph1"><h1>Browse <span class="count">(${browseFiltered.length})</span></h1>${qHtml || cHtml ? `<div class="qtags">${qHtml}${cHtml}</div>` : ''}</div>
       <div class="toolbar" role="toolbar" aria-label="Filter and sort">
         <span class="tb-lbl">Sort:</span>
         <select id="fSort" class="tb-select" aria-label="Sort by" onchange="LF._browse({sort:this.value})">
@@ -355,6 +420,7 @@
           <svg class="ic"><use href="${dirIcon}"/></svg>${dirLabel}
         </button>
         <div class="tb-sep" aria-hidden="true"></div>
+        ${catSel}
         <button class="tb-btn${bstate.subs ? ' on' : ''}" id="fSubs" type="button" aria-pressed="${bstate.subs}" onclick="LF._browse({subs:!LF._bs.subs})">
           <svg class="ic"><use href="#i-cc"/></svg>Has Subtitles
         </button>
@@ -375,7 +441,11 @@
       if (first) setTimeout(() => { if (!modalEl && document.activeElement !== sq()) first.focus({ preventScroll: true }); }, 80);
     }
   }
-  LF._browse = (p) => { bstate = Object.assign({}, bstate, p); LF._bs = bstate; if (page === 'browse') renderBrowse(); };
+  LF._browse = (p) => {
+    bstate = Object.assign({}, bstate, p); LF._bs = bstate;
+    if ('cat' in p) syncCatUrl();
+    if (page === 'browse') renderBrowse();
+  };
   LF._bs = bstate;
 
   /* ---- page rendering ---- */
@@ -390,7 +460,8 @@
       const q = (params.q || new URLSearchParams()).get('q') || '';
       const sort = (params.q || new URLSearchParams()).get('sort') || bstate.sort;
       const dir = (params.q || new URLSearchParams()).get('dir') || bstate.dir;
-      bstate = { q, sort, dir, subs: bstate.subs };
+      const cat = (params.q || new URLSearchParams()).has('cat') ? params.q.get('cat') : bstate.cat;
+      bstate = { q, sort, dir, subs: bstate.subs, cat };
       LF._bs = bstate;
       renderBrowse();
     }
@@ -410,6 +481,7 @@
           <dl class="facts">
             <dt>Format</dt><dd>${m.ext}</dd>
             <dt>Size</dt><dd>${m.size_str}</dd>
+            ${m.category ? `<dt>Category</dt><dd>${esc(m.category)}</dd>` : ''}
             ${m.folder ? `<dt>Folder</dt><dd>${esc(m.folder)}</dd>` : ''}
           </dl>
           <div class="actions" style="margin-top:20px">
@@ -545,7 +617,7 @@
   function runSearch(go) {
     const q = sq().value.trim(); closeSugg(); if (q) pushRecent(q);
     if (go || page === 'browse') {
-      if (page !== 'browse' || location.hash.indexOf('#/browse') !== 0) { location.hash = '#/browse?q=' + encodeURIComponent(q) + '&sort=' + bstate.sort + '&dir=' + bstate.dir; }
+      if (page !== 'browse' || location.hash.indexOf('#/browse') !== 0) { location.hash = '#/browse?q=' + encodeURIComponent(q) + '&sort=' + bstate.sort + '&dir=' + bstate.dir + (bstate.cat ? '&cat=' + encodeURIComponent(bstate.cat) : ''); }
       else setBrowse({ q });
     }
   }
@@ -967,7 +1039,7 @@
       try {
         // Only a changed list of movies re-renders the page. A finished poster is swapped in place below,
         // otherwise the page (and the TV focus ring) would be rebuilt every few seconds while posters download.
-        const sig = () => LF.movies.map((m) => m.id).join('|');
+        const sig = () => LF.movies.map((m) => m.id + ':' + (m.cat || '') + ':' + (m.category || '')).join('|');
         const before = sig(); const old = new Map(LF.movies.map((m) => [m.id, m.pv]));
         const [movies, info] = await Promise.all([LF.api('/api/movies'), LF.api('/api/info')]);
         LF.movies = prep(movies); LF.info = info;

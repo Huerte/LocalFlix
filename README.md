@@ -413,12 +413,12 @@ There is **no mouse cursor** anywhere: everything is controlled with the remote 
 2. Press OK on **Build** seven times. A message says "You are now a developer".
 3. Settings -> Device Preferences -> Developer options
 4. Turn on **USB debugging** and **ADB debugging over network**
-5. Write down the IP shown, for example `192.168.1.20:5555`
+5. Write down the IP shown, for example `192.168.1.34:5555`
 
 ### Install with ADB (no USB cable)
 
 ```powershell
-adb connect 192.168.1.20:5555
+adb connect 192.168.1.34:5555
 adb install -r "app\build\outputs\apk\debug\app-debug.apk"
 ```
 

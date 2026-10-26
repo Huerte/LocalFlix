@@ -430,7 +430,15 @@
   }
   function nudgeOffset(dt) {
     subOffset = Math.round((subOffset + dt) * 10) / 10;
-    LF.store.set('lf.suboff.' + m.id, subOffset); renderCues();
+    LF.store.set('lf.suboff.' + m.id, subOffset);
+    renderCues();
+    // Show a brief on-screen indicator so the user sees the current offset
+    toast((subOffset === 0 ? 'Subtitle sync reset' : 'Subtitle delay: ' + (subOffset > 0 ? '+' : '') + subOffset.toFixed(1) + 's'), null, 1200);
+  }
+  function setOffset(val) {
+    subOffset = Math.round(val * 10) / 10;
+    LF.store.set('lf.suboff.' + m.id, subOffset);
+    renderCues();
   }
 
   /* ---- menus ---- */
@@ -445,9 +453,36 @@
       tracks.forEach((t, i) => { h += mi(t.label, { on: curTrack === t, act: 'sub:' + i, sub: t.ext + (t.sub && t.ext !== 'Embedded' ? '  ·  ' + t.sub : '') }); });
       if (!tracks.length) h += '<div class="pm-g" style="text-transform:none;letter-spacing:0;font-size:.9rem;color:#c3c8d4;padding:8px 10px">No subtitle was found for this movie.</div>';
       h += '<div class="pm-g">Add subtitles</div>' + mi('Browse subtitle folder', { act: 'view:browse', tail: 1 }) + mi('Upload from this device', { act: 'sub:upload' }) +
-        '<div class="pm-g">Customize</div>' + mi('Appearance and timing', { act: 'view:style', tail: 1, sub: subOffset ? 'Delay ' + (subOffset > 0 ? '+' : '') + subOffset.toFixed(1) + 's' : '' });
+        '<div class="pm-g">Customize</div>' + mi('Appearance and timing', { act: 'view:style', tail: 1, sub: subOffset ? 'Delay ' + (subOffset > 0 ? '+' : '') + subOffset.toFixed(1) + 's' : '' }) +
+        mi('Subtitle sync', { act: 'view:sync', tail: 1, sub: subOffset === 0 ? 'No offset' : (subOffset > 0 ? '+' : '') + subOffset.toFixed(1) + 's' });
     } else if (menuView === 'browse') {
       h = head('Subtitle folder', true) + '<input class="pm-search" id="subQ" type="search" placeholder="Search subtitle files" aria-label="Search subtitle files" autocomplete="off"><div id="subList"></div>';
+    } else if (menuView === 'sync') {
+      const offStr = (subOffset > 0 ? '+' : '') + subOffset.toFixed(1) + 's';
+      const presets = [-5, -2, -1, -0.5, 0, 0.5, 1, 2, 5];
+      h = head('Subtitle sync', true) +
+        `<div class="sync-panel">
+          <div class="sync-display">
+            <div class="sync-label">Current offset</div>
+            <div class="sync-val ${subOffset > 0 ? 'pos' : subOffset < 0 ? 'neg' : ''}" id="syncVal">${offStr}</div>
+            <div class="sync-hint">${subOffset === 0 ? 'Subtitles are in sync' : subOffset > 0 ? 'Subtitles appear later' : 'Subtitles appear earlier'}</div>
+          </div>
+          <div class="sync-presets">
+            ${presets.map((p) => `<button class="sync-chip${p === subOffset ? ' on' : ''}" type="button" data-act="setsync:${p}">${p > 0 ? '+' : ''}${p.toFixed(1)}s</button>`).join('')}
+          </div>
+          <div class="sync-fine">
+            <div class="sync-fine-row">
+              <button class="sync-nb" type="button" data-act="syncnudge:-1" aria-label="Back 1 second">-1s</button>
+              <button class="sync-nb" type="button" data-act="syncnudge:-0.5" aria-label="Back 0.5 seconds">-0.5s</button>
+              <button class="sync-nb lg" type="button" data-act="syncnudge:-0.1" aria-label="Back 0.1 seconds">-0.1s</button>
+              <button class="sync-nb lg" type="button" data-act="syncnudge:0.1" aria-label="Forward 0.1 seconds">+0.1s</button>
+              <button class="sync-nb" type="button" data-act="syncnudge:0.5" aria-label="Forward 0.5 seconds">+0.5s</button>
+              <button class="sync-nb" type="button" data-act="syncnudge:1" aria-label="Forward 1 second">+1s</button>
+            </div>
+            <div class="sync-tip">Use [ and ] keys to nudge ±0.5s while watching</div>
+          </div>
+          <button class="sync-reset" type="button" data-act="syncreset">Reset offset to 0</button>
+        </div>`;
     } else if (menuView === 'style') {
       h = head('Appearance and timing', true) + step('Size', 'size', s.size + '%') + step('Position', 'pos', s.pos + '%') +
         step('Delay', 'delay', (subOffset > 0 ? '+' : '') + subOffset.toFixed(1) + 's') +
@@ -476,8 +511,15 @@
       if (subQ) subQ.oninput = (e) => { clearTimeout(subSearchT); subSearchT = setTimeout(() => loadSubList(e.target.value), 200); };
     }
     if (!keepFocus) {
-      const f = pm.querySelector('[aria-checked="true"]') || pm.querySelector('.pm-i') || pm.querySelector('button');
-      if (menuView === 'browse') { const sq = $('#subQ'); if (sq) sq.focus(); } else if (f) f.focus();
+      if (menuView === 'browse') { const sq = $('#subQ'); if (sq) sq.focus(); }
+      else if (menuView === 'sync') {
+        // Focus the active preset chip, or the first nudge button if offset not in presets
+        const active = pm.querySelector('.sync-chip.on') || pm.querySelector('.sync-nb');
+        if (active) active.focus();
+      } else {
+        const f = pm.querySelector('[aria-checked="true"]') || pm.querySelector('.pm-i') || pm.querySelector('button');
+        if (f) f.focus();
+      }
     }
   }
   async function loadSubList(q) {
@@ -494,7 +536,7 @@
   function toggleMenu(mv) { if (menuView === mv) closeMenu(); else { menuView = mv; renderMenu(); showUI(true); } }
   function closeMenu() { menuView = ''; E.pMenu.hidden = true; renderCues(); showUI(); }
   function menuBack() {
-    if (menuView === 'browse' || menuView === 'style') { menuView = 'subs'; renderMenu(); }
+    if (menuView === 'browse' || menuView === 'style' || menuView === 'sync') { menuView = 'subs'; renderMenu(); }
     else { const prev = menuView; closeMenu(); (prev === 'subs' ? E.bSubs : prev === 'audio' ? E.bAudio : E.bSet).focus(); }
   }
   function onMenuClick(e) {
@@ -516,6 +558,21 @@
     else if (a === 'size:+' || a === 'size:-') { s.size = Math.max(50, Math.min(250, s.size + (a.endsWith('+') ? 10 : -10))); redraw(); }
     else if (a === 'pos:+' || a === 'pos:-') { s.pos = Math.max(2, Math.min(40, s.pos + (a.endsWith('+') ? 2 : -2))); redraw(); }
     else if (a === 'delay:+' || a === 'delay:-') { nudgeOffset(a.endsWith('+') ? 0.1 : -0.1); redraw(); }
+    else if (a.startsWith('syncnudge:')) {
+      const dt = parseFloat(a.slice(10)); nudgeOffset(dt);
+      // Live-update the display in-place so focus is never lost (important for TV remote)
+      const syncValEl = E.pMenu.querySelector('#syncVal');
+      if (syncValEl) {
+        const offStr2 = (subOffset > 0 ? '+' : '') + subOffset.toFixed(1) + 's';
+        syncValEl.textContent = offStr2;
+        syncValEl.className = 'sync-val ' + (subOffset > 0 ? 'pos' : subOffset < 0 ? 'neg' : '');
+        const hintEl = syncValEl.nextElementSibling;
+        if (hintEl) hintEl.textContent = subOffset === 0 ? 'Subtitles are in sync' : subOffset > 0 ? 'Subtitles appear later' : 'Subtitles appear earlier';
+        E.pMenu.querySelectorAll('.sync-chip').forEach((c) => c.classList.toggle('on', parseFloat(c.dataset.act.slice(9)) === subOffset));
+      } else { redraw(); }
+    }
+    else if (a.startsWith('setsync:')) { setOffset(parseFloat(a.slice(8))); redraw(); }
+    else if (a === 'syncreset') { setOffset(0); redraw(); }
     else if (a.startsWith('color:')) { s.color = a.slice(6); redraw(); }
     else if (a.startsWith('bg:')) { s.bg = a.slice(3); redraw(); }
     else if (a === 'style:reset') { LF.prefs.subStyle = { size: 100, color: '#ffffff', bg: 'outline', pos: 8 }; subOffset = 0; LF.store.set('lf.suboff.' + m.id, 0); redraw(); }
@@ -576,6 +633,8 @@
       else if (tracks.length) { selectTrack(tracks[0], true); }
       return true;
     }
+    if (k === '[' || k === '{') { e.preventDefault(); nudgeOffset(-0.5); return true; }
+    if (k === ']' || k === '}') { e.preventDefault(); nudgeOffset(0.5); return true; }
     if (k === 'n' || k === 'N') { goNext(); return true; }
     if (k === 'Home') { e.preventDefault(); seekTo(0); return true; }
     if (k === 'End') { e.preventDefault(); seekTo(total() - 5); return true; }

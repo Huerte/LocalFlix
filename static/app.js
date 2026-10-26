@@ -121,18 +121,38 @@
     const watched = prog && prog.watched;
     return `<div class="poster ${cls || ''}" data-id="${m.id}"><div class="ph ${m.poster !== 'ready' ? 'shim' : ''}">${m.poster === 'ready' ? `<img data-p="1" alt="" src="/poster/${m.id}?v=${m.pv}" loading="lazy">` : `<b>${esc(m.title)}</b><small>${m.year || m.ext}</small>`}</div>${m.subs ? '<div class="badges"><span class="badge cc">CC</span></div>' : ''}</div>${pct > 3 && !watched ? `<div class="prog"><i style="width:${pct}%"></i></div>` : ''}`;
   }
+  // IntersectionObserver-based image lazy loader for smooth card rendering
+  let _imgObs = null;
+  function getImgObs() {
+    if (!_imgObs) {
+      _imgObs = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) return;
+          const img = entry.target;
+          _imgObs.unobserve(img);
+          if (!img.src) img.src = img.dataset.src;
+          if (img.complete) { img.classList.add('ld'); return; }
+          img.addEventListener('load', () => img.classList.add('ld'), { once: true });
+          img.addEventListener('error', () => img.closest('.ph')?.classList.remove('shim'), { once: true });
+        });
+      }, { rootMargin: '300px' });
+    }
+    return _imgObs;
+  }
   function settleImages(root) {
     (root || document).querySelectorAll('img[data-p]').forEach((img) => {
-      if (img.complete) { img.classList.add('ld'); return; }
-      img.addEventListener('load', () => img.classList.add('ld'), { once: true });
+      if (img.classList.contains('ld')) return;
+      if (img.complete && img.naturalWidth > 0) { img.classList.add('ld'); return; }
+      // If src not yet set (data-src pattern), or image not loaded yet
+      getImgObs().observe(img);
     });
   }
 
   /* ---- card ---- */
   function card(m) {
-    const prog = LF.progress.get(m.id);
     return `<a class="card" href="#/movie/${m.id}" data-id="${m.id}" aria-label="${esc(m.title)}${m.year ? ' (' + m.year + ')' : ''}" role="article">
       ${posterEl(m)}
+      <div class="card-overlay"><div class="card-overlay-play"><svg class="ic"><use href="#i-play"/></svg></div></div>
       <div class="c-t">${esc(m.title)}</div>
       <div class="c-m">${[m.year, m.ext].filter(Boolean).join(' · ')}</div>
     </a>`;
@@ -230,17 +250,47 @@
     return list;
   }
   function setBrowse(patch) { Object.assign(bstate, patch); if (page === 'browse') renderBrowse(); }
+  // Paginated browse: load PAGE_SIZE cards at a time with IntersectionObserver
+  const PAGE_SIZE = 24;
+  let browseObserver = null;
+  let browseFiltered = [];
+  let browseLoaded = 0;
+
+  function appendBrowseCards(grid, start, end) {
+    const frag = document.createDocumentFragment();
+    browseFiltered.slice(start, end).forEach((m) => {
+      const div = document.createElement('div');
+      div.innerHTML = card(m);
+      frag.appendChild(div.firstElementChild);
+    });
+    grid.appendChild(frag);
+    settleImages(grid);
+    browseLoaded = end;
+  }
+
+  function setupBrowseObserver(grid, sentinel) {
+    if (browseObserver) browseObserver.disconnect();
+    browseObserver = new IntersectionObserver((entries) => {
+      if (!entries[0].isIntersecting) return;
+      if (browseLoaded >= browseFiltered.length) { browseObserver.disconnect(); sentinel.hidden = true; return; }
+      const next = Math.min(browseLoaded + PAGE_SIZE, browseFiltered.length);
+      appendBrowseCards(grid, browseLoaded, next);
+      if (browseLoaded >= browseFiltered.length) { browseObserver.disconnect(); sentinel.hidden = true; }
+    }, { rootMargin: '300px' });
+    browseObserver.observe(sentinel);
+  }
+
   function renderBrowse(q) {
     if (q) { bstate = Object.assign({}, bstate, q); }
     const main = $('#main');
-    // Re-rendering replaces the toolbar, so remember which toolbar control had focus (sort / order / subtitles).
     const keepId = document.activeElement && /^f(Sort|Dir|Subs)$/.test(document.activeElement.id || '') ? document.activeElement.id : '';
-    const filtered = applyBrowse(LF.movies);
+    browseFiltered = applyBrowse(LF.movies);
+    browseLoaded = 0;
     const dirIcon = bstate.dir === 'asc' ? '#i-up' : '#i-down';
     const dirLabel = bstate.dir === 'asc' ? 'A to Z' : 'Z to A';
     const qHtml = bstate.q ? `<span class="qtag">"${esc(bstate.q)}" <button type="button" aria-label="Clear search" onclick="LF._browse({q:''})"><svg class="ic"><use href="#i-close"/></svg></button></span>` : '';
     main.innerHTML = `<div class="page">
-      <div class="ph1"><h1>Browse <span class="count">(${filtered.length})</span></h1>${qHtml}</div>
+      <div class="ph1"><h1>Browse <span class="count">(${browseFiltered.length})</span></h1>${qHtml}</div>
       <div class="toolbar" role="toolbar" aria-label="Filter and sort">
         <span class="tb-lbl">Sort:</span>
         <select id="fSort" class="tb-select" aria-label="Sort by" onchange="LF._browse({sort:this.value})">
@@ -257,11 +307,17 @@
           <svg class="ic"><use href="#i-cc"/></svg>Has Subtitles
         </button>
       </div>
-      <div class="grid" id="bGrid">${filtered.length ? filtered.map(card).join('') : '<div class="state" style="margin:40px auto"><svg class="ic"><use href="#i-search"/></svg><h2>No results</h2><p>Try different keywords or remove filters.</p></div>'}</div>
+      ${browseFiltered.length ? '<div class="grid" id="bGrid"></div><div class="loading-more" id="bSentinel"><div class="spinner"></div><span>Loading more...</span></div>' : '<div class="state" style="margin:40px auto"><svg class="ic"><use href="#i-search"/></svg><h2>No results</h2><p>Try different keywords or remove filters.</p></div>'}
     </div>`;
-    settleImages(main);
+    if (browseFiltered.length) {
+      const grid = $('#bGrid', main);
+      const sentinel = $('#bSentinel', main);
+      const first = Math.min(PAGE_SIZE, browseFiltered.length);
+      appendBrowseCards(grid, 0, first);
+      if (browseLoaded >= browseFiltered.length) { sentinel.hidden = true; }
+      else setupBrowseObserver(grid, sentinel);
+    }
     if (keepId) { const k = $('#' + keepId); if (k) { k.focus({ preventScroll: true }); return; } }
-    // Auto-focus the first card for TV remote users (but never pull focus out of the search box while typing)
     if (!document.body.classList.contains('pointer')) {
       const first = $('#bGrid .card', main);
       if (first) setTimeout(() => { if (document.activeElement !== sq()) first.focus({ preventScroll: true }); }, 80);
@@ -474,6 +530,15 @@
   /* ---- focus nav (TV remote) ---- */
   const FOCUSABLE = 'a[href],button:not([disabled]),input:not([type=hidden]):not([disabled]),select,[tabindex="0"]';
   function visible(el) { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden' && !el.closest('[hidden]'); }
+  // Determine if an element belongs to the topbar (navbar links, search, icon buttons)
+  function isTopbarEl(el) {
+    return el.closest('.topbar') !== null;
+  }
+  // Determine if the current focused element is a card in the grid
+  function isBrowseCard(el) {
+    return !!(el && el.closest('#bGrid, .row'));
+  }
+
   LF.moveFocus = function (dir, root) {
     root = root || document;
     const cur = document.activeElement;
@@ -483,6 +548,8 @@
       if (first) { first.focus(); return true; } return false;
     }
     const cr = cur.getBoundingClientRect(), cx = cr.left + cr.width / 2, cy = cr.top + cr.height / 2;
+    // When navigating UP from a browse card, ignore topbar elements unless nothing else is above
+    const curInGrid = isBrowseCard(cur);
     let best = null, bs = Infinity;
     for (const el of els) {
       const r = el.getBoundingClientRect(), ex = r.left + r.width / 2, ey = r.top + r.height / 2;
@@ -493,10 +560,22 @@
       else { if (dy >= -4) continue; main = -dy; cross = Math.abs(dx); }
       if (main <= 0) continue;
       const overlap = (dir === 'left' || dir === 'right') ? !(r.bottom < cr.top || r.top > cr.bottom) : !(r.right < cr.left || r.left > cr.right);
-      const sc = main + cross * (overlap ? 1.2 : 4);
+      let sc = main + cross * (overlap ? 1.5 : 5);
+      // Heavy penalty: when in the grid and pressing left/right, strongly discourage jumping to topbar
+      if (curInGrid && isTopbarEl(el) && (dir === 'left' || dir === 'right')) sc += 9999;
+      // When pressing up from a card, strongly prefer toolbar buttons over the search input
+      if (curInGrid && dir === 'up' && el.id === 'q') sc += 8000;
       if (sc < bs) { bs = sc; best = el; }
     }
-    if (best) { best.focus({ preventScroll: true }); best.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' }); return true; }
+    if (best) {
+      // If the best candidate is the topbar search input when going up from grid, skip to toolbar nav instead
+      if (curInGrid && dir === 'up' && best === sq()) {
+        const alt = els.filter((e) => isTopbarEl(e) && e !== sq() && e.getBoundingClientRect().bottom <= cy)
+          .sort((a, b) => { const ar = a.getBoundingClientRect(), br = b.getBoundingClientRect(); return Math.abs(ar.left + ar.width / 2 - cx) - Math.abs(br.left + br.width / 2 - cx); })[0];
+        if (alt) { alt.focus({ preventScroll: true }); alt.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' }); return true; }
+      }
+      best.focus({ preventScroll: true }); best.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' }); return true;
+    }
     return false;
   };
   let pointerUsed = false;
@@ -656,7 +735,7 @@
   LF.start = async function () {
     setupSearch();
     if (LF.app) setupTv();
-    $('#main').innerHTML = '<div class="page"><div class="grid" style="margin-top:40px">' + '<div class="skel"></div>'.repeat(12) + '</div></div>';
+    $('#main').innerHTML = '<div class="page"><div class="grid" style="margin-top:40px">' + '<div class="skel"></div>'.repeat(20) + '</div></div>';
     window.addEventListener('hashchange', () => { LF.routed = true; route(); });
     const ok = await LF.load(false);
     if (ok) { route(true); LF.routed = true; tick(); }

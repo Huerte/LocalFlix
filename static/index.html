@@ -8,6 +8,8 @@
 <title>LocalFlix</title>
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <script>if(window.LocalFlixTV||navigator.userAgent.indexOf('LocalFlixTV')>=0)document.documentElement.classList.add('lftv')</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
@@ -88,16 +90,20 @@
       <div class="seek-thumb" id="sThumb"></div><div class="seek-tip" id="sTip" hidden></div>
     </div>
     <div class="p-row">
-      <button class="pbtn" id="bPlay" type="button" aria-label="Play"><svg class="ic"><use href="#i-play"/></svg></button>
-      <button class="pbtn" id="bBack" type="button" aria-label="Back 10 seconds"><svg class="ic"><use href="#i-b10"/></svg></button>
-      <button class="pbtn" id="bFwd" type="button" aria-label="Forward 10 seconds"><svg class="ic"><use href="#i-f10"/></svg></button>
+      <!-- Left cluster: playback controls + time -->
+      <div class="p-cluster">
+        <button class="pbtn" id="bBack" type="button" aria-label="Back 10 seconds"><svg class="ic"><use href="#i-b10"/></svg></button>
+        <button class="pbtn" id="bPlay" type="button" aria-label="Play"><svg class="ic"><use href="#i-play"/></svg></button>
+        <button class="pbtn" id="bFwd" type="button" aria-label="Forward 10 seconds"><svg class="ic"><use href="#i-f10"/></svg></button>
+      </div>
       <button class="pbtn" id="bMute" type="button" aria-label="Mute"><svg class="ic"><use href="#i-vol"/></svg></button>
       <input class="vol" id="vol" type="range" min="0" max="1" step="0.05" value="1" aria-label="Volume">
       <div class="time"><span id="tCur">0:00</span><span class="sep">/</span><span id="tDur">0:00</span></div>
       <div class="grow"></div>
+      <!-- Right cluster: overlays + extras -->
       <button class="pbtn" id="bNext" type="button" aria-label="Next episode" hidden><svg class="ic"><use href="#i-next"/></svg></button>
-      <button class="pbtn with-label" id="bSubs" type="button" aria-haspopup="menu" aria-label="Subtitles"><svg class="ic"><use href="#i-cc"/></svg><span class="lbl">Subtitles</span></button>
-      <button class="pbtn with-label" id="bAudio" type="button" aria-haspopup="menu" aria-label="Audio" hidden><svg class="ic"><use href="#i-audio"/></svg><span class="lbl">Audio</span></button>
+      <button class="pbtn pill" id="bSubs" type="button" aria-haspopup="menu" aria-label="Subtitles"><svg class="ic"><use href="#i-cc"/></svg><span class="lbl">Subtitles</span></button>
+      <button class="pbtn pill" id="bAudio" type="button" aria-haspopup="menu" aria-label="Audio" hidden><svg class="ic"><use href="#i-audio"/></svg><span class="lbl">Audio</span></button>
       <button class="pbtn" id="bSet" type="button" aria-haspopup="menu" aria-label="Playback settings"><svg class="ic"><use href="#i-sliders"/></svg></button>
       <button class="pbtn" id="bPip" type="button" aria-label="Picture in picture"><svg class="ic"><use href="#i-pip"/></svg></button>
       <button class="pbtn" id="bFull" type="button" aria-label="Full screen"><svg class="ic"><use href="#i-full"/></svg></button>

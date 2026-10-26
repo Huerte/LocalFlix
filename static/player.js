@@ -107,6 +107,15 @@
     E.pMenu.addEventListener('click', onMenuClick);
     window.addEventListener('resize', applySubStyle);
     root.addEventListener('focusin', () => showUI());
+    // While a player menu is open the remote must never escape to the video controls behind it.
+    // This mirrors the modal focusin trap in app.js.
+    document.addEventListener('focusin', (e) => {
+      if (!menuView || !E.pMenu || E.pMenu.hidden) return;
+      if (E.pMenu.contains(e.target)) { E.pMenu._last = e.target; return; }
+      const back = (E.pMenu._last && E.pMenu.contains(E.pMenu._last) ? E.pMenu._last : null)
+        || E.pMenu.querySelector('[aria-checked="true"]') || E.pMenu.querySelector('.pm-i,button');
+      if (back) back.focus({ preventScroll: true });
+    }, true);
 
     if ('mediaSession' in navigator) {
       try {

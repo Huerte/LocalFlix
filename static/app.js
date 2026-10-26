@@ -886,9 +886,13 @@
     document.addEventListener('focusin', (e) => { if (isText(e.target)) e.target.setAttribute('inputmode', 'none'); });
     let pendingField = null;
     // Called by the app when the text box closes: text = what was typed, null = cancelled; submit = OK / Search pressed.
+    let _autoKbCooldown = false;   // true for a short window after a native dialog closes, blocks re-open on refocus
     LF.onNativeText = function (text, submit) {
       const t = pendingField; pendingField = null;
       if (!t) return;
+      // Block the auto-keyboard listener from re-opening the dialog when we refocus the field.
+      _autoKbCooldown = true;
+      setTimeout(() => { _autoKbCooldown = false; }, 400);
       try { t.focus({ preventScroll: true }); } catch { /* gone */ }
       if (text == null) return;
       t.value = text;
@@ -909,14 +913,38 @@
     }, true);
     // 3. The suggestion dropdown must never stay open over the page once focus has left the search box.
     sq().addEventListener('blur', closeSugg);
-    // 4. While a dialog (movie details / settings) is open, focus can never leave it. Before, a stray focus() or
-    //    key press could land on the navbar or the next section behind the dialog.
+    // 4. While a dialog (movie details / settings) is open, focus can NEVER leave it.
+    //    A stray focus() or arrow key must not land on the navbar or the page behind the dialog.
     document.addEventListener('focusin', (e) => {
       if (!modalEl) return;
       if (modalEl.contains(e.target)) { modalEl._last = e.target; return; }
-      const back = (modalEl._last && modalEl.contains(modalEl._last) && modalEl._last) || $('#dPlay,#sChange,.btn,.inp,.m-close', modalEl);
+      // Focus escaped the modal: pull it straight back.
+      const back = (modalEl._last && modalEl.contains(modalEl._last) ? modalEl._last : null)
+        || $('#dPlay,#sChange,.btn,.inp,.m-close', modalEl)
+        || $$(FOCUSABLE, modalEl).filter(visible)[0];
       if (back) back.focus({ preventScroll: true });
     }, true);
+    // 5. Auto-open the text-entry popup whenever a search / text input inside a modal or player menu
+    //    receives D-pad focus. This saves the user from having to press OK first.
+    //    _autoKbCooldown (declared just above in LF.onNativeText) blocks re-open on refocus after dialog close.
+    let _pendingAutoKb = false;
+    document.addEventListener('focusin', (e) => {
+      if (_pendingAutoKb || _autoKbCooldown || pointerUsed) return;
+      if (!isText(e.target)) return;
+      if (!window.LocalFlixTV || !window.LocalFlixTV.editText) return;
+      const inContainer = !!(modalEl && modalEl.contains(e.target)) || !!e.target.closest('.pmenu');
+      if (!inContainer) return;
+      _pendingAutoKb = true;
+      const t = e.target;
+      setTimeout(() => {
+        _pendingAutoKb = false;
+        if (document.activeElement !== t || pendingField || _autoKbCooldown) return;
+        pendingField = t;
+        const lbl = t.getAttribute('aria-label') || t.placeholder || 'Enter text';
+        try { window.LocalFlixTV.editText(lbl, t.value || '', t.placeholder || '', t.type === 'search' ? 'search' : (t.type || 'text')); }
+        catch { pendingField = null; }
+      }, 120);
+    });
   }
 
   /* ---- routing ---- */

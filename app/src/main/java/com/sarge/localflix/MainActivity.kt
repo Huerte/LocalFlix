@@ -401,6 +401,9 @@ class MainActivity : FragmentActivity() {
      * Menu opens the server screen. Arrow keys are NOT handled here: they belong to the page.
      */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // Connect screen: keep the D-pad inside its own panel; never let it bleed into the WebView behind.
+        if (b.connectPanel.visibility == View.VISIBLE &&
+            FocusTrap.blocks(event, currentFocus, b.connectPanel)) return true
         when (event.keyCode) {
             KeyEvent.KEYCODE_BACK -> {
                 if (event.action == KeyEvent.ACTION_UP) handleBack()

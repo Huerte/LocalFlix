@@ -1023,8 +1023,12 @@ class PlayerActivity : FragmentActivity() {
             if (down && holdDir != 0) stopHold()      // any other key ends a hold
         }
 
-        // Menu or dialog open: normal focus navigation between their buttons.
-        if (dialogOn || menuOn) return super.dispatchKeyEvent(e)
+        // Menu or dialog open: the remote is locked to the active panel.
+        // Arrows at the first/last item do nothing instead of escaping to the controls behind.
+        if (dialogOn || menuOn) {
+            if (FocusTrap.blocks(e, currentFocus, if (dialogOn) b.dialogPanel else b.menuPanel)) return true
+            return super.dispatchKeyEvent(e)
+        }
 
         val isOk = k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER || k == KeyEvent.KEYCODE_NUMPAD_ENTER || k == KeyEvent.KEYCODE_BUTTON_A
         val isDir = k == KeyEvent.KEYCODE_DPAD_LEFT || k == KeyEvent.KEYCODE_DPAD_RIGHT || k == KeyEvent.KEYCODE_DPAD_UP || k == KeyEvent.KEYCODE_DPAD_DOWN

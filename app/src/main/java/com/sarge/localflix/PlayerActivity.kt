@@ -81,6 +81,7 @@ class PlayerActivity : FragmentActivity() {
     private var cuesFor = -2
     private var cueJob: Job? = null
     private var subSizePct = 100           // subtitle size in percent (Settings menu)
+    private var subOffsetMs = 0L           // subtitle sync: + = subtitles appear later, - = earlier (remembered per movie)
 
     // ── playback speed ────────────────────────────────────────────────────────
     private var speed = 1f
@@ -116,6 +117,7 @@ class PlayerActivity : FragmentActivity() {
 
         speed = prefs.getFloat(KEY_SPEED, 1f)
         subSizePct = prefs.getInt(KEY_SUB_SIZE, 100)
+        subOffsetMs = prefs.getLong(KEY_SUB_OFFSET + req.id, 0L)
 
         // Same title block as the web player: title, then "year · 1080p · MKV".
         b.titleText.text = req.title
@@ -227,6 +229,7 @@ class PlayerActivity : FragmentActivity() {
                     .build()
             }
             exo.setMediaItem(MediaItem.Builder().setUri(req.streamUrl).setSubtitleConfigurations(subs).build(), positionMs)
+            loadCuesIfNeeded()      // only does something when a subtitle offset is active
         }
         // Subtitles off by default; applySubtitle() switches the chosen track on once ExoPlayer lists it.
         exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
@@ -398,7 +401,8 @@ class PlayerActivity : FragmentActivity() {
         val ed = prefs.edit().putBoolean(KEY_SUBS_ON, index >= 0)
         if (index >= 0) ed.putString(KEY_SUB_LABEL, req.subtitles[index].label)
         ed.apply()
-        if (transcoding) loadCuesIfNeeded() else applySubtitle()
+        loadCuesIfNeeded()
+        if (!transcoding) applySubtitle()
         b.subText.visibility = View.GONE
     }
 
@@ -406,7 +410,8 @@ class PlayerActivity : FragmentActivity() {
     private fun applySubtitle() {
         val exo = player ?: return
         val params = exo.trackSelectionParameters.buildUpon()
-        if (subChoice < 0) {
+        // With a sync offset we draw the lines ourselves (ExoPlayer cannot shift side-loaded cues), so keep its track off.
+        if (subChoice < 0 || ownCues()) {
             params.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
         } else {
             // Not listed yet? onTracksChanged calls us again.
@@ -425,7 +430,7 @@ class PlayerActivity : FragmentActivity() {
     /** Transcode mode: download the cue list of the chosen track (the .vtt url without ".vtt" is the JSON one). */
     private fun loadCuesIfNeeded() {
         if (subChoice < 0) { cueJob?.cancel(); cues = emptyList(); cuesFor = -1; return }
-        if (cuesFor == subChoice) return
+        if (!ownCues() || cuesFor == subChoice) return
         cueJob?.cancel()
         cues = emptyList()
         cuesFor = subChoice
@@ -441,13 +446,29 @@ class PlayerActivity : FragmentActivity() {
         }
     }
 
-    /** Transcode mode only: draw the line(s) active at the current movie time. */
+    /** True when we draw the subtitle lines ourselves: converted stream, or a sync offset is set. */
+    private fun ownCues() = transcoding || subOffsetMs != 0L
+
+    /** Subtitle sync. Positive = subtitles later (delay), negative = earlier. Saved per movie. */
+    private fun setSubOffset(ms: Long) {
+        subOffsetMs = ms.coerceIn(-60_000L, 60_000L)
+        prefs.edit().putLong(KEY_SUB_OFFSET + req.id, subOffsetMs).apply()
+        loadCuesIfNeeded()
+        if (!transcoding) { appliedSub = Int.MIN_VALUE; applySubtitle() }   // switch ExoPlayer's own track on/off
+        b.subText.visibility = View.GONE
+        updateUi()
+    }
+
+    private fun offsetText(ms: Long): String =
+        if (ms == 0L) "0.0s" else String.format(Locale.US, "%+.1fs", ms / 1000.0)
+
+    /** Draw the line(s) active at the current movie time (shifted by the sync offset). */
     private fun drawCue() {
-        if (!transcoding || subChoice < 0 || cues.isEmpty()) {
+        if (!ownCues() || subChoice < 0 || cues.isEmpty()) {
             if (b.subText.visibility != View.GONE) b.subText.visibility = View.GONE
             return
         }
-        val t = logicalPos() / 1000.0
+        val t = (logicalPos() - subOffsetMs) / 1000.0
         // cues are sorted by start; look at the last few that started before now
         var lo = 0; var hi = cues.size - 1; var idx = -1
         while (lo <= hi) { val mid = (lo + hi) ushr 1; if (cues[mid].start <= t) { idx = mid; lo = mid + 1 } else hi = mid - 1 }
@@ -465,13 +486,31 @@ class PlayerActivity : FragmentActivity() {
 
     // ── menus (subtitles / audio) ─────────────────────────────────────────────
 
-    private class MenuEntry(val label: String, val checked: Boolean, val onPick: () -> Unit)
+    private class MenuEntry(val label: String, val checked: Boolean, val keepOpen: Boolean = false, val onPick: () -> Unit)
 
     private fun openSubtitleMenu() {
         val items = ArrayList<MenuEntry>()
         items.add(MenuEntry("Off", subChoice < 0) { selectSubtitle(-1) })
         req.subtitles.forEachIndexed { i, s -> items.add(MenuEntry(s.label, subChoice == i) { selectSubtitle(i) }) }
+        items.add(MenuEntry("Subtitle sync:  " + offsetText(subOffsetMs), false) { openSyncMenu(0) })
         openMenu("Subtitles", items, b.bSubs)
+    }
+
+    /** Subtitle sync (delay / faster). Picking a row changes the offset and keeps the menu open. */
+    private fun openSyncMenu(focusIdx: Int) {
+        val steps = listOf(
+            "Delay (subtitles later)   +0.1s" to 100L, "Delay (subtitles later)   +0.5s" to 500L, "Delay (subtitles later)   +1s" to 1000L,
+            "Faster (subtitles earlier)   -0.1s" to -100L, "Faster (subtitles earlier)   -0.5s" to -500L, "Faster (subtitles earlier)   -1s" to -1000L)
+        val items = ArrayList<MenuEntry>()
+        steps.forEachIndexed { i, (label, d) ->
+            items.add(MenuEntry(label, false, true) {
+                setSubOffset(subOffsetMs + d)
+                if (subChoice < 0) showMsg("Turn a subtitle on to see the change.")
+                openSyncMenu(i)
+            })
+        }
+        items.add(MenuEntry("Reset to 0", subOffsetMs == 0L, true) { setSubOffset(0); openSyncMenu(steps.size) })
+        openMenu("Subtitle sync:  " + offsetText(subOffsetMs), items, b.bSubs, focusIdx)
     }
 
     private fun openAudioMenu() {
@@ -512,6 +551,7 @@ class PlayerActivity : FragmentActivity() {
                 showMsg(if (x == 1f) "Normal speed" else "Speed ${x}x")
             })
         }
+        items.add(MenuEntry("Subtitle sync:  " + offsetText(subOffsetMs), false) { openSyncMenu(0) })
         for ((label, pct) in listOf("Small" to 80, "Normal" to 100, "Large" to 130, "Huge" to 170)) {
             items.add(MenuEntry("Subtitle size:  $label", subSizePct == pct) {
                 subSizePct = pct
@@ -524,7 +564,7 @@ class PlayerActivity : FragmentActivity() {
 
     private fun channelsText(ch: Int) = when { ch <= 0 -> ""; ch == 1 -> "Mono"; ch == 2 -> "Stereo"; ch == 6 -> "5.1"; ch == 8 -> "7.1"; else -> "$ch ch" }
 
-    private fun openMenu(title: String, items: List<MenuEntry>, opener: View) {
+    private fun openMenu(title: String, items: List<MenuEntry>, opener: View, focusIdx: Int = -1) {
         menuOpener = opener
         b.menuTitle.text = title
         b.menuList.removeAllViews()
@@ -534,7 +574,7 @@ class PlayerActivity : FragmentActivity() {
                 text = "Nothing to choose from."; setTextColor(ContextCompat.getColor(this@PlayerActivity, R.color.muted)); textSize = 18f
             })
         }
-        for (e in items) {
+        for ((idx, e) in items.withIndex()) {
             val btn = Button(this).apply {
                 text = (if (e.checked) "✓    " else "       ") + e.label
                 isAllCaps = false
@@ -545,10 +585,11 @@ class PlayerActivity : FragmentActivity() {
                 stateListAnimator = null
                 minimumHeight = dp(50)
                 setPadding(dp(14), 0, dp(14), 0)
-                setOnClickListener { closeMenu(); e.onPick() }
+                setOnClickListener { if (!e.keepOpen) closeMenu(); e.onPick() }
             }
             b.menuList.addView(btn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(4) })
-            if (e.checked || focusTarget == null) focusTarget = btn   // focus the current choice, else the first row
+            if (focusIdx >= 0) { if (idx == focusIdx) focusTarget = btn }
+            else if (e.checked || focusTarget == null) focusTarget = btn   // focus the current choice, else the first row
         }
         menuOn = true
         ui.removeCallbacks(hideRunnable)
@@ -772,5 +813,6 @@ class PlayerActivity : FragmentActivity() {
         private const val KEY_SUB_LABEL = "sub_label"
         private const val KEY_SPEED = "speed"
         private const val KEY_SUB_SIZE = "sub_size"
+        private const val KEY_SUB_OFFSET = "sub_offset_"
     }
 }

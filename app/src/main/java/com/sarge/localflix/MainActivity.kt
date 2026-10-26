@@ -278,9 +278,17 @@ class MainActivity : FragmentActivity() {
         /** The page keeps text fields silent until OK is pressed, then asks for the on-screen keyboard. */
         @JavascriptInterface fun showKeyboard() = runOnUiThread {
             val wv = webView ?: return@runOnUiThread
-            wv.postDelayed({
-                (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(wv, 0)
-            }, 80)   // small delay: the page switches inputmode just before calling us
+            val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+            // The page switches inputmode and re-focuses the field just before calling us; the browser process learns
+            // about that a moment later. So: make sure the WebView owns focus, rebuild its input connection, then ask
+            // for the keyboard, and ask once more shortly after in case the first request came too early.
+            val show = Runnable {
+                if (!wv.hasFocus()) wv.requestFocus()
+                imm.restartInput(wv)
+                if (!imm.showSoftInput(wv, InputMethodManager.SHOW_IMPLICIT)) imm.showSoftInput(wv, 0)
+            }
+            wv.postDelayed(show, 80)
+            wv.postDelayed({ if (wv.hasFocus()) imm.showSoftInput(wv, 0) }, 350)
         }
 
         @JavascriptInterface fun hideKeyboard() = runOnUiThread {

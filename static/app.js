@@ -299,7 +299,9 @@
     browseFiltered = applyBrowse(LF.movies);
     browseLoaded = 0;
     const dirIcon = bstate.dir === 'asc' ? '#i-up' : '#i-down';
-    const dirLabel = bstate.dir === 'asc' ? 'A to Z' : 'Z to A';
+    // The label follows the chosen sort: A to Z for names, oldest/newest for year and date, smallest/largest for size.
+    const dirLabels = { name: ['A to Z', 'Z to A'], added: ['Oldest first', 'Newest first'], year: ['Oldest first', 'Newest first'], size: ['Smallest first', 'Largest first'] };
+    const dirLabel = (dirLabels[bstate.sort] || dirLabels.name)[bstate.dir === 'asc' ? 0 : 1];
     const qHtml = bstate.q ? `<span class="qtag">"${esc(bstate.q)}" <button type="button" aria-label="Clear search" onclick="LF._browse({q:''})"><svg class="ic"><use href="#i-close"/></svg></button></span>` : '';
     main.innerHTML = `<div class="page">
       <div class="ph1"><h1>Browse <span class="count">(${browseFiltered.length})</span></h1>${qHtml}</div>
@@ -837,17 +839,25 @@
     // 2. Text fields: stay silent until OK is pressed, so merely moving over the search box does not pop up the keyboard.
     const isText = (el) => el && el.tagName === 'INPUT' && /^(text|search|url|email|tel|password)$/.test(el.type || 'text');
     document.addEventListener('focusin', (e) => { if (isText(e.target) && !e.target._kb) e.target.setAttribute('inputmode', 'none'); });
+    let kbSwitch = false;   // true while we re-focus the field on purpose (see below): that blur must not reset anything
     document.addEventListener('focusout', (e) => {
-      if (!isText(e.target)) return;
+      if (!isText(e.target) || kbSwitch) return;
       e.target._kb = false; e.target.setAttribute('inputmode', 'none');
       try { window.LocalFlixTV.hideKeyboard(); } catch { /* bridge missing */ }
     });
     document.addEventListener('keydown', (e) => {
       const t = e.target;
-      if (e.key !== 'Enter' || !isText(t) || t._kb) return;
+      // Some TV builds report the remote's OK button as keyCode 23 (DPAD_CENTER) instead of key "Enter".
+      if (!(e.key === 'Enter' || e.keyCode === 13 || e.keyCode === 23) || !isText(t) || t._kb) return;
       if (t.id === 'q' && sel >= 0) return;            // OK on a highlighted suggestion opens it
       e.preventDefault(); e.stopPropagation();          // first OK = open the on-screen keyboard
       t._kb = true; t.setAttribute('inputmode', t.type === 'search' ? 'search' : 'text');
+      // The field got focus while inputmode was "none", so the WebView has no text-input connection for it, and
+      // changing the attribute afterwards does not tell the browser. Re-focusing makes it re-read inputmode;
+      // without this the keyboard request below has nothing to attach to and no keyboard appears.
+      kbSwitch = true;
+      try { const a = t.selectionStart, z = t.selectionEnd; t.blur(); t.focus({ preventScroll: true }); try { t.setSelectionRange(a, z); } catch { /* no caret */ } }
+      finally { kbSwitch = false; }
       try { window.LocalFlixTV.showKeyboard(); } catch { /* bridge missing */ }
     }, true);
     // 3. The suggestion dropdown must never stay open over the page once focus has left the search box.

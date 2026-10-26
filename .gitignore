@@ -39,3 +39,4 @@ Thumbs.db
 
 # TV monitor settings (your Wi-Fi name and TV address)
 /tv_monitor.json
+/tv_monitor.server.pid

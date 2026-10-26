@@ -7,14 +7,17 @@ LocalFlix TV monitor (Windows 11) - starts the LocalFlix server only when you ar
     py tv_monitor.py --run       the background loop (Task Scheduler runs this, see TV_AUTOSTART_GUIDE.md)
 
 What it does
-  * run_only_with_tv (default on): the monitor only stays alive while ALL THREE are true: you are on the home network,
+  * The monitor only stays alive while ALL THREE are true: you are on the home network,
     the TV is on it too, and (once started) the server is running. Task Scheduler launches it every minute; if home or
     TV is missing it ends within a second or two, so the task shows "Ready" instead of "Running".
   * Not on your home network        -> the monitor ENDS ITSELF after about a minute, so nothing runs away from home.
                                        Windows starts it again when you connect to a network (Task Scheduler trigger).
-  * At home, TV not on the Wi-Fi    -> waits (one ping every `poll_seconds`).
+  * At home, TV not on the Wi-Fi    -> ends within a second or two (Task Scheduler checks again every minute).
   * At home and the TV is found     -> starts `localflix.py --no-browser` hidden in the background.
-  * Server already running          -> nothing to do; it only looks again once a minute.
+  * TV leaves the Wi-Fi (or you leave home) for about 2 minutes in a row
+                                     -> the server THIS MONITOR STARTED is stopped, then the monitor ends. A server you
+                                        started yourself is never touched. (stop_server_when_tv_leaves, default on)
+  * Server already running          -> nothing to do; it only looks again every 30 seconds.
   * keep_awake (default on)         -> while the server runs, you are home and the TV is on the Wi-Fi, Windows is asked
                                        not to go to sleep on its own (the screen may still turn off). Plugged in only,
                                        unless "keep_awake_on_battery" is true. Released as soon as the TV is gone.
@@ -45,24 +48,21 @@ DEFAULTS = {
     "home_gateway_macs": [],       # router MAC(s): stronger proof of "home" than the name alone
     "tv_ip": "",                   # the TV's address (reserve it in your router so it never changes)
     "tv_mac": "",                  # the TV's MAC: protects against another device taking the TV's address
-    "poll_seconds": 15,            # how often to look for the TV while at home and the server is not running
-    "stop_when_leaving_home": False,   # True: also stop the server this script started when you leave home
+    "stop_server_when_tv_leaves": True,  # stop the server this monitor started once the TV is off the Wi-Fi (or you left home)
     "server_args": ["--no-browser"],   # extra arguments for localflix.py
     "port": 0,                     # 0 = read it from config.json (default 8080)
-    "run_only_with_tv": True,      # stay alive only while at home AND the TV is on the Wi-Fi (Task Scheduler re-checks)
-    "exit_when_away": True,        # end the monitor when you are not on the home network (it restarts on connect)
     "keep_awake": True,            # stop Windows sleeping on its own while the TV is using the server
     "keep_awake_on_battery": False,    # False: only keep awake while the charger is plugged in
 }
 
 AWAY_POLL = 30          # seconds between "am I home?" checks while away
-AWAY_EXIT_CHECKS = 2    # not home this many checks in a row (30-60 s) -> leave home mode / end the monitor
 BREAKAWAY = 0x01000000          # CREATE_BREAKAWAY_FROM_JOB: the server must not end together with the monitor
-RUNNING_POLL = 60       # seconds between checks while the server is up
 MIN_RESTART_GAP = 60    # never start the server twice within this many seconds
 SWEEP_GAP = 120         # never sweep the whole network more often than this
 KEEP_AWAKE_POLL = 30    # seconds between "is the TV still there?" checks while keeping the laptop awake
-TV_MISS_LIMIT = 2       # TV missing this many checks in a row (about 60 s) -> let the laptop sleep again / end
+TV_MISS_LIMIT = 2       # TV missing this many checks in a row (about 60 s) -> let the laptop sleep again
+STOP_MISS_LIMIT = 4     # TV missing this many checks in a row (about 2 min) -> stop the server we started (survives Wi-Fi blips)
+PID_PATH = os.path.join(HERE, "tv_monitor.server.pid")   # remembers the server this monitor started (survives monitor restarts)
 
 NO_WINDOW = 0x08000000          # CREATE_NO_WINDOW
 NEW_GROUP = 0x00000200          # CREATE_NEW_PROCESS_GROUP
@@ -252,20 +252,90 @@ def start_server(cfg):
     log.info("Starting LocalFlix: %s", " ".join(cmd))
     flags = (NO_WINDOW | NEW_GROUP) if os.name == "nt" else 0
     kw = dict(cwd=HERE, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    proc = None
     if os.name == "nt":
         try:        # leave Task Scheduler's job, so the server keeps running when the monitor ends
-            return subprocess.Popen(cmd, creationflags=flags | BREAKAWAY, **kw)
+            proc = subprocess.Popen(cmd, creationflags=flags | BREAKAWAY, **kw)
         except OSError:
             pass
-    return subprocess.Popen(cmd, creationflags=flags, **kw)
+    if proc is None:
+        proc = subprocess.Popen(cmd, creationflags=flags, **kw)
+    write_pid(proc.pid)
+    return proc
 
 
-def stop_server(proc):
-    log.info("Left home: stopping the LocalFlix server that this monitor started.")
+def write_pid(pid):
+    try:
+        with open(PID_PATH, "w", encoding="utf-8") as fh:
+            fh.write(str(pid))
+    except OSError:
+        log.warning("Could not write %s", PID_PATH)
+
+
+def read_pid():
+    try:
+        with open(PID_PATH, "r", encoding="utf-8") as fh:
+            return int(fh.read().strip())
+    except (OSError, ValueError):
+        return 0
+
+
+def clear_pid():
+    try:
+        os.remove(PID_PATH)
+    except OSError:
+        pass
+
+
+def pid_is_localflix(pid, port):
+    """True when `pid` is alive AND is our localflix.py (guards against a recycled PID)."""
+    if not pid:
+        return False
     if os.name == "nt":
-        run_cmd(["taskkill", "/PID", str(proc.pid), "/T", "/F"])
+        out = run_cmd(["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                       f"(Get-CimInstance Win32_Process -Filter 'ProcessId={int(pid)}').CommandLine"], timeout=10)
+        if out.strip():
+            return "localflix.py" in out.lower()
+        # PowerShell gave nothing (blocked?): fall back to "the process exists and the server port answers".
+        alive = f'"{int(pid)}"' in run_cmd(["tasklist", "/FI", f"PID eq {int(pid)}", "/FO", "CSV", "/NH"])
+        return alive and port_open(port)
+    try:
+        os.kill(pid, 0)
+        with open(f"/proc/{pid}/cmdline", "rb") as fh:
+            return b"localflix.py" in fh.read()
+    except FileNotFoundError:
+        return True            # no /proc (macOS): the process exists, trust the pid file
+    except OSError:
+        return False
+
+
+def owned_server_pid(proc, port):
+    """PID of the server this monitor started (also in an earlier monitor run), or 0 when there is none."""
+    if proc and proc.poll() is None:
+        return proc.pid
+    pid = read_pid()
+    if pid and pid_is_localflix(pid, port):
+        return pid
+    if pid:
+        clear_pid()
+    return 0
+
+
+def stop_server(pid, port):
+    """Stop the server process tree and wait (a few seconds) until its port is closed."""
+    log.info("The TV is gone: stopping the LocalFlix server that this monitor started (pid %s).", pid)
+    if os.name == "nt":
+        run_cmd(["taskkill", "/PID", str(pid), "/T", "/F"])
     else:
-        proc.terminate()
+        try:
+            os.kill(pid, 15)
+        except OSError:
+            pass
+    for _ in range(12):
+        if not port_open(port):
+            break
+        time.sleep(0.5)
+    clear_pid()
 
 
 # ───────────────────────── keep Windows awake while the TV is watching ─────────────────────────
@@ -325,37 +395,35 @@ def single_instance():
 
 
 def run_strict(cfg, finder, awake, port):
-    """Alive only while at home AND the TV is on the Wi-Fi. Launched by Task Scheduler every minute: the first check
-    decides at once (no home or no TV -> exit in a second or two, nothing stays running). Once both are true it starts the
-    server if needed, keeps the laptop awake, and ends about a minute after the TV (or home) is gone."""
-    first, away, misses, proc, last_start = True, 0, 0, None, 0.0
+    """Alive only while (at home AND the TV is on the Wi-Fi) OR a server this monitor started is still waiting to be stopped.
+    Launched by Task Scheduler every minute: with no home / no TV and nothing of ours running it exits at once.
+    Once both are true it starts the server if needed and keeps the laptop awake. When the TV (or home) is gone for
+    STOP_MISS_LIMIT checks in a row (about 2 minutes) it stops the server it started and ends."""
+    first, misses, proc, last_start = True, 0, None, 0.0
+    stop_flag = cfg["stop_server_when_tv_leaves"]
     while True:
         try:
-            if not is_home(cfg):
-                away += 1
-                if first or away >= AWAY_EXIT_CHECKS:
-                    awake.set(False)
-                    if proc and proc.poll() is None and cfg["stop_when_leaving_home"]:
-                        stop_server(proc)
-                    if not first:
-                        log.info("Not on the home network: the monitor ends.")
-                    return
-                time.sleep(AWAY_POLL)
-                continue
-            away = 0
-            tv = finder.present()
+            tv = is_home(cfg) and finder.present()      # away from home counts as "TV gone"
             misses = 0 if tv else misses + 1
-            if misses >= (1 if first else TV_MISS_LIMIT):
-                awake.set(False)
-                if not first:
-                    log.info("The TV left the Wi-Fi: the monitor ends (the server keeps running).")
-                return
+            if not tv:
+                if misses >= TV_MISS_LIMIT:
+                    awake.set(False)
+                mine = owned_server_pid(proc, port) if stop_flag else 0
+                if misses >= (STOP_MISS_LIMIT if mine else (1 if first else TV_MISS_LIMIT)):
+                    if mine:
+                        stop_server(mine, port)
+                        proc = None
+                    log.info("Home or TV is gone: the monitor ends.%s", "" if mine else " (a server that is running stays.)")
+                    return
+                first = False
+                time.sleep(KEEP_AWAKE_POLL)
+                continue
             if first:
                 log.info("At home and the TV is on the Wi-Fi: monitor active (TV %s, port %s).", cfg["tv_ip"], port)
             first = False
             up = port_open(port)
             running = up or bool(proc and proc.poll() is None)
-            if tv and not running and time.time() - last_start >= MIN_RESTART_GAP:
+            if not running and time.time() - last_start >= MIN_RESTART_GAP:
                 proc = start_server(cfg)
                 last_start = time.time()
                 time.sleep(10)
@@ -383,56 +451,7 @@ def run_loop():
     port = server_port(cfg)
     finder = TvFinder(cfg)
     awake = KeepAwake(cfg)
-    misses = 0
-    away = 0
-    proc = None
-    last_start = 0.0
-    if cfg["run_only_with_tv"]:
-        return run_strict(cfg, finder, awake, port)
-    log.info("Monitor started. Home = %s %s | TV = %s %s | port %s", cfg["home_ssids"], cfg["home_gateway_macs"],
-             cfg["tv_ip"], cfg["tv_mac"], port)
-    while True:
-        try:
-            up = port_open(port)
-            running = up or bool(proc and proc.poll() is None)
-            if not running:
-                awake.set(False)
-            if (up and not cfg["keep_awake"] and not cfg["exit_when_away"]
-                    and not (proc and cfg["stop_when_leaving_home"])):
-                time.sleep(RUNNING_POLL)            # nothing to do: the server is already there
-                continue
-            if not is_home(cfg):
-                awake.set(False)
-                away += 1
-                if away >= AWAY_EXIT_CHECKS:        # a short Wi-Fi hiccup does not count, a real absence does
-                    if proc and proc.poll() is None and cfg["stop_when_leaving_home"]:
-                        stop_server(proc)
-                        proc = None
-                    if cfg["exit_when_away"]:
-                        log.info("Not on the home network: the monitor ends. It starts again when Windows connects to a network.")
-                        return
-                time.sleep(AWAY_POLL)
-                continue
-            away = 0
-            if running:                             # at home and the server is running
-                if cfg["keep_awake"]:
-                    misses = 0 if finder.present() else misses + 1
-                    awake.set(misses < TV_MISS_LIMIT)
-                    time.sleep(KEEP_AWAKE_POLL)
-                else:
-                    time.sleep(RUNNING_POLL)
-                continue
-            misses = 0
-            if finder.present() and time.time() - last_start >= MIN_RESTART_GAP:
-                log.info("At home and the TV is on the Wi-Fi.")
-                proc = start_server(cfg)
-                last_start = time.time()
-                time.sleep(10)
-                continue
-            time.sleep(max(5, int(cfg["poll_seconds"])))
-        except Exception:
-            log.exception("Unexpected error (the monitor keeps going)")
-            time.sleep(AWAY_POLL)
+    return run_strict(cfg, finder, awake, port)
 
 
 # ───────────────────────── --check and --setup ─────────────────────────

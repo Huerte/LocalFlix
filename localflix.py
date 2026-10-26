@@ -5,7 +5,6 @@ LocalFlix - your own movie library, on every screen in the house.
     py localflix.py                     start the server
     py localflix.py --movies D:\\Films    use another folder
     py localflix.py --firewall          (Windows, run as Administrator) let phones and TVs connect
-    py localflix.py --autostart         (Windows) start LocalFlix quietly when you sign in
 
 Then open the address it prints on any phone, tablet, TV or computer on the same Wi-Fi.
 """
@@ -40,8 +39,6 @@ def parse_args():
     p.add_argument("--local-only", action="store_true", help="only accept connections from this computer")
     p.add_argument("--remote-admin", action="store_true", help="let other devices change folder settings")
     p.add_argument("--firewall", action="store_true", help="Windows: allow the port through the firewall, then exit")
-    p.add_argument("--autostart", action="store_true", help="Windows: start LocalFlix when you sign in, then exit")
-    p.add_argument("--no-autostart", action="store_true", help="Windows: remove the sign-in start entry, then exit")
     return p.parse_args()
 
 
@@ -59,31 +56,6 @@ def open_firewall(port):
     else:
         print("  Could not add the rules. Right-click Command Prompt, choose 'Run as administrator', then run:")
         print("      py localflix.py --firewall")
-
-
-def startup_file():
-    return os.path.join(os.environ.get("APPDATA", ""), "Microsoft", "Windows", "Start Menu", "Programs", "Startup",
-                        "LocalFlix.vbs")
-
-
-def set_autostart(on):
-    if os.name != "nt":
-        print("  --autostart is for Windows only. On other systems add this script to your login items.")
-        return
-    path = startup_file()
-    if not on:
-        try:
-            os.remove(path)
-            print("  LocalFlix will no longer start by itself.")
-        except OSError:
-            print("  Nothing to remove.")
-        return
-    py = sys.executable
-    pyw = py[:-10] + "pythonw.exe" if py.lower().endswith("python.exe") else py
-    here = os.path.abspath(__file__)
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write('CreateObject("Wscript.Shell").Run """%s"" ""%s"" --no-browser", 0, False\n' % (pyw, here))
-    print("  Done. LocalFlix will start quietly in the background every time you sign in to Windows.")
 
 
 def ask_for_folder():
@@ -109,9 +81,6 @@ def ask_for_folder():
 def main():
     args = parse_args()
     cfg.load()
-    if args.autostart or args.no_autostart:
-        set_autostart(args.autostart)
-        return
     if args.movies:
         cfg.set("movies_dir", os.path.expanduser(args.movies), persist=False)
         if not args.subtitles:

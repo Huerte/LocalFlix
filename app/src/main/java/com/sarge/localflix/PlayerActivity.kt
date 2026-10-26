@@ -2,12 +2,12 @@ package com.sarge.localflix
 
 import android.content.Context
 import android.content.Intent
-import android.content.res.ColorStateList
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.KeyEvent
@@ -91,6 +91,7 @@ class PlayerActivity : FragmentActivity() {
     // the player waits ("Connection lost") and continues from the same spot as soon as the laptop is back.
     private var reconnecting = false
     private var reconnectJob: Job? = null
+    private var reconnectSince = 0L        // when the laptop was lost (SystemClock.elapsedRealtime)
     private var checkingError = false      // an error is being examined: is it the file, or the laptop?
     private var netRetries = 0             // quick retries after a network hiccup while the laptop is still there
 
@@ -170,7 +171,7 @@ class PlayerActivity : FragmentActivity() {
     override fun onStart() {
         super.onStart()
         if (!::req.isInitialized) return
-        // Coming back after Home while waiting for the laptop: keep waiting (the dialog is still on screen).
+        // Coming back after Home while waiting for the laptop: keep waiting (the banner is still on screen).
         if (reconnecting) { startReconnectLoop(true); ui.post(tick); return }
         // First start, or coming back after Home / another app: continue where we were.
         if (player == null && !dialogOn) {
@@ -469,26 +470,38 @@ class PlayerActivity : FragmentActivity() {
         persistResume()
         releasePlayer()
         reconnecting = true
-        b.spinner.visibility = View.GONE
-        showReconnectDialog()
+        reconnectSince = SystemClock.elapsedRealtime()
+        hideDialog()
+        hideControls()
+        b.bigPlay.visibility = View.GONE
+        showWaiting()
         startReconnectLoop(false)
     }
 
-    private fun showReconnectDialog() {
-        showDialog("Connection lost",
-            "We can't reach your laptop right now.\n\nPlease make sure it is turned on and LocalFlix is running. " +
-                "We keep trying, and your movie continues from where it stopped as soon as it is back.",
-            "Try now", { showReconnectDialog(); startReconnectLoop(true) },
-            "Close", { stopReconnect(); finishWithResult(null) }) { stopReconnect(); finishWithResult(null) }
+    /**
+     * No dialog while the laptop is away: a dialog that has to be closed (and that comes back) ruins a TV screen.
+     * Instead one quiet banner + spinner stays up, we retry in the background and the movie continues by itself.
+     * Back leaves the player. After GIVE_UP_MS without the laptop we leave quietly (the position is already saved).
+     */
+    private fun showWaiting() {
+        ui.removeCallbacks(hideMsg)
+        b.msgText.text = "Reconnecting to your laptop..."
+        b.msgText.visibility = View.VISIBLE
+        b.spinner.visibility = View.VISIBLE
     }
 
     private fun startReconnectLoop(immediately: Boolean) {
         reconnectJob?.cancel()
         reconnectJob = lifecycleScope.launch {
-            if (!immediately) delay(RECONNECT_MS)
+            var wait = RECONNECT_MS
+            if (!immediately) delay(wait)
             while (true) {
                 if (serverAlive()) { onReconnected(); return@launch }
-                delay(RECONNECT_MS)
+                if (SystemClock.elapsedRealtime() - reconnectSince > GIVE_UP_MS) {
+                    stopReconnect(); finishWithResult(null); return@launch      // quietly back to the app, no dialog
+                }
+                wait = (wait * 3 / 2).coerceAtMost(RECONNECT_MAX_MS)            // 3 s, 4.5 s ... up to 10 s
+                delay(wait)
             }
         }
     }
@@ -502,6 +515,7 @@ class PlayerActivity : FragmentActivity() {
         reconnecting = false
         netRetries = 0
         hideDialog()
+        b.spinner.visibility = View.VISIBLE        // startPlayback keeps it up until the first frame
         showMsg("Connected again", 2500)
         startPlayback(lastPosMs, transcoding)      // same movie, same time, same mode
     }
@@ -1130,6 +1144,7 @@ class PlayerActivity : FragmentActivity() {
             if (e.action == KeyEvent.ACTION_UP) onBackKey()
             return true
         }
+        if (reconnecting) return true      // waiting for the laptop: nothing else to press (no controls, no player)
 
         // Media keys work in every state.
         when (k) {
@@ -1202,6 +1217,7 @@ class PlayerActivity : FragmentActivity() {
 
     private fun onBackKey() {
         when {
+            reconnecting -> { stopReconnect(); finishWithResult(null) }
             dialogOn -> dialogCancel?.invoke()
             menuOn -> { val back = menuBackTo; if (back != null) back() else closeMenu() }
             controlsOn -> hideControls()
@@ -1214,7 +1230,9 @@ class PlayerActivity : FragmentActivity() {
     companion object {
         const val EXTRA_REQUEST = "request"
         private const val STALL_MS = 8_000L        // buffering this long: check whether the laptop is still there
-        private const val RECONNECT_MS = 3_000L    // how often we look for the laptop after it was lost
+        private const val RECONNECT_MS = 3_000L    // first retry delay after the laptop was lost
+        private const val RECONNECT_MAX_MS = 10_000L   // retry delay never grows beyond this
+        private const val GIVE_UP_MS = 15 * 60_000L    // laptop gone this long: leave the player quietly
         const val RESULT_ID = "id"
         const val RESULT_SECONDS = "seconds"
         const val RESULT_FINISHED = "finished"

@@ -82,13 +82,20 @@ cfg = Config()
 
 
 # --------------------------------------------------------------------------- naming
-JUNK = re.compile(
-    r"^(2160p|1080p|1080i|720p|480p|360p|4k|uhd|hdr|hdr10|dv|bluray|blu|ray|brrip|bdrip|webrip|web|webdl|hdrip|dvdrip|dvd|"
-    r"hdtv|hdcam|cam|ts|x264|x265|h264|h265|hevc|avc|xvid|divx|aac|ac3|eac3|dts|ddp5|dd5|atmos|10bit|8bit|"
-    r"yts|yify|rarbg|ettv|etrg|amzn|nf|extended|unrated|remastered|proper|repack|multi|dual|sub|subs|subbed|dubbed|"
-    r"5\.1|7\.1|mx|am|lt|ag|bone|galaxyrg|psa|ntb|evo|fgt|sparks|tigole|qxr|ion10|mp4|mkv)$",
-    re.I,
+# Words that only ever appear in release names: safe to cut the title at the first one.
+_STRONG = (
+    r"2160p|1080p|1080i|720p|480p|360p|4k|uhd|hdr|hdr10|bluray|blu|ray|brrip|bdrip|webrip|web|webdl|hdrip|dvdrip|dvd|"
+    r"hdtv|hdcam|x264|x265|h264|h265|hevc|avc|xvid|divx|aac|ac3|eac3|dts|ddp5|dd5|atmos|10bit|8bit|"
+    r"yts|yify|rarbg|ettv|etrg|amzn|5\.1|7\.1|mp4|mkv"
 )
+# Short tags and plain words that are ALSO real title words ("I Am Legend", "Dual", "Proper"): they are only dropped when
+# they trail the title in capitals (release groups such as "...-AM"), never from the middle of it.
+_WEAK = (
+    r"dv|nf|am|lt|ag|mx|ts|cam|sub|subs|subbed|dubbed|multi|dual|extended|unrated|remastered|proper|repack|"
+    r"bone|galaxyrg|psa|ntb|evo|fgt|sparks|tigole|qxr|ion10"
+)
+STRONG_JUNK = re.compile(r"^(" + _STRONG + r")$", re.I)
+JUNK = re.compile(r"^(" + _STRONG + r"|" + _WEAK + r")$", re.I)   # inside [brackets] every such word is a tag
 YEAR = re.compile(r"(?<![0-9])((?:19|20)\d{2})(?![0-9])")
 LANGS = {
     "en": "English", "eng": "English", "english": "English", "tl": "Tagalog", "tgl": "Tagalog", "tagalog": "Tagalog",
@@ -140,9 +147,12 @@ def parse_name(stem: str):
     else:
         keep = []
         for p in parts:
-            if JUNK.match(p.strip("-")) and keep:
+            if STRONG_JUNK.match(p.strip("-")) and keep:
                 break
             keep.append(p)
+        if len(keep) < len(parts):                    # a release tag was found: capitals right before it are group tags
+            while len(keep) > 1 and keep[-1].isupper() and JUNK.match(keep[-1].strip("-")):
+                keep.pop()
         parts = keep
     title = " ".join(parts).strip(" -") or stem
     title = re.sub(r"-[A-Za-z0-9]+$", "", title) if re.search(r"-[A-Z0-9]{2,}$", title) and year is None else title

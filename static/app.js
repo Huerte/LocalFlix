@@ -22,7 +22,7 @@
     const timer = ctl ? setTimeout(() => ctl.abort(), LF.API_TIMEOUT) : 0;
     let r;
     try { r = await fetch(path, ctl ? Object.assign({}, opts, { signal: ctl.signal }) : opts); }
-    catch (e) { const err = new Error(LF.OFFLINE_MSG); err.offline = true; err.friendly = true; throw err; }
+    catch (e) { LF.noteOffline(); const err = new Error(LF.OFFLINE_MSG); err.offline = true; err.friendly = true; throw err; }
     finally { if (timer) clearTimeout(timer); }
     if (!r.ok) {
       const t = await r.text().catch(() => '');
@@ -115,8 +115,12 @@
   };
   // Friendly "something is not available right now" window (TV and browser). o: { title, text, retry, keepHash }
   //   keepHash: the page URL was already restored, so closing must not touch the browser history.
+  //   offline: true -> the laptop is simply not reachable. That is NEVER a dialog (it would come back again and again
+  //   while the laptop is off): a short toast is shown and the quiet reconnect loop below does the rest.
   LF.notice = function (o) {
     o = o || {};
+    if (o.offline) { LF.noteOffline(); LF.toast('Your laptop is not reachable. Reconnecting in the background...'); return null; }
+    if (modalEl && modalEl._notice) return modalEl._noticeKey === o.title ? modalEl : null;   // never stack or repeat notices
     const html = `<div class="modal sm"><div class="m-body"><div class="state" style="margin:0;padding:8px 0 0">
         <svg class="ic"><use href="#i-alert"/></svg>
         <h2 style="padding:0">${esc(o.title || 'Cannot reach your laptop')}</h2>
@@ -126,7 +130,7 @@
           <button class="btn${o.retry ? '' : ' primary'}" type="button" id="nClose">Close</button>
         </div></div></div></div>`;
     const modal = openModal(html);
-    modal.el._notice = !!o.keepHash;
+    modal.el._notice = !!o.keepHash; modal.el._noticeKey = o.title;
     const rb = $('#nRetry', modal.el), cb = $('#nClose', modal.el);
     cb.onclick = () => LF.closeOverlay();
     if (rb) rb.onclick = () => { if (o.keepHash) closeModal(); else closeModal(true); o.retry(); };
@@ -134,11 +138,43 @@
     return modal;
   };
   LF.toast = function (msg) {
+    if ($$('.toast', $('#toasts')).some((x) => x.textContent === msg)) return;      // same message already on screen
     const t = document.createElement('div');
     t.className = 'toast'; t.textContent = msg;
     $('#toasts').appendChild(t);
     setTimeout(() => t.remove(), 3000);
   };
+
+  /* ---- connection to the laptop: one quiet state, no dialogs ---- */
+  // When the laptop stops answering the page keeps what it already shows, a small pill says "Reconnecting...", and a
+  // background loop (4 s, slowly backing off to 15 s) asks /api/info until the laptop is back. Nothing else is shown.
+  LF.online = true;
+  let recT = 0, recDelay = 0;
+  function pill(on) { const el = $('#connPill'); if (el) el.hidden = !on; }
+  function scheduleRecover(ms) { clearTimeout(recT); recT = setTimeout(recover, ms); }
+  async function probe() {
+    const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const t = setTimeout(() => ctl && ctl.abort(), 3000);
+    try { const r = await fetch('/api/info', { cache: 'no-store', signal: ctl ? ctl.signal : undefined }); return r.ok; }
+    catch { return false; }
+    finally { clearTimeout(t); }
+  }
+  let missed = 0;
+  async function recover() {
+    if (!(await probe())) {
+      // Every few misses ask the TV app to look for the laptop again (its address may have changed). Silent.
+      if (++missed % 3 === 0) { try { window.LocalFlixTV.rescan(); } catch { /* browser, or an older app build */ } }
+      recDelay = Math.min(recDelay ? Math.round(recDelay * 1.5) : 4000, 15000); scheduleRecover(recDelay); return; }
+    recDelay = 0; missed = 0; LF.online = true; LF.offline = false; pill(false);
+    try { await LF.refresh(); } catch { /* it went away again: LF.api already switched back to the quiet loop */ }
+  }
+  LF.noteOffline = function () {
+    if (!LF.online) return;
+    LF.online = false; LF.offline = true; recDelay = 0;
+    pill(true); scheduleRecover(4000);
+  };
+  LF.recheck = function () { if (!LF.online) scheduleRecover(0); };
+  window.addEventListener('online', () => LF.recheck());
 
   /* ---- data ---- */
   LF.movies = []; LF.info = null; LF.offline = false;
@@ -207,7 +243,7 @@
     const prog = LF.progress.get(m.id);
     const pct = prog && prog.d ? Math.round(prog.t / prog.d * 100) : 0;
     const watched = prog && prog.watched;
-    return `<div class="poster ${cls || ''}" data-id="${m.id}"><div class="ph ${m.poster !== 'ready' ? 'shim' : ''}">${m.poster === 'ready' ? `<img data-p="1" alt="" decoding="async" src="${posterUrl(m)}" loading="lazy">` : `<b>${esc(m.title)}</b><small>${m.year || m.ext}</small>`}</div>${m.subs ? '<div class="badges"><span class="badge cc">CC</span></div>' : ''}</div>${pct > 3 && !watched ? `<div class="prog"><i style="width:${pct}%"></i></div>` : ''}`;
+    return `<div class="poster ${cls || ''}" data-id="${m.id}"><div class="ph ${m.poster !== 'ready' ? 'shim' : ''}">${m.poster === 'ready' ? `<img data-p="1" alt="" decoding="async" src="${posterUrl(m)}" loading="lazy">` : ''}</div>${m.subs ? '<div class="badges"><span class="badge cc">CC</span></div>' : ''}</div>${pct > 3 && !watched ? `<div class="prog"><i style="width:${pct}%"></i></div>` : ''}`;
   }
   // IntersectionObserver-based image lazy loader for smooth card rendering
   let _imgObs = null;
@@ -287,14 +323,22 @@
     const info = LF.info || {};
     const heroMeta = posters.infoCache ? posters.infoCache[hero.id] : {};
     let rowSeq = 0;
-    function rowHtml(title, list, limit = 18, seeAll = '') {
+    // Rows stay short on purpose: a few cards, then a last "See more" card that opens Browse already filtered.
+    const ROW_LIMIT = 7;
+    function moreCard(title, rest, href) {
+      return `<a class="card card-more" href="${href}" aria-label="See more in ${esc(title)}, ${rest} more">
+        <div class="poster"><div class="more-in"><svg class="ic"><use href="#i-chev"/></svg><b>See more</b><small>${rest} more</small></div></div>
+      </a>`;
+    }
+    function rowHtml(title, list, limit = ROW_LIMIT, moreHref = '') {
       const items = list.slice(0, limit);
       if (!items.length) return '';
       const rid = 'r' + (rowSeq++);   // unique and always a valid id, whatever the folder is called
+      const more = moreHref && list.length > limit ? moreCard(title, list.length - limit, moreHref) : '';
       return `<section class="sec" aria-labelledby="${rid}">
-        <div class="sec-h"><h2 id="${rid}">${esc(title)}</h2>${seeAll ? `<a href="${seeAll}" aria-label="See all ${list.length} in ${esc(title)}">See all ${list.length}</a>` : ''}</div>
+        <div class="sec-h"><h2 id="${rid}">${esc(title)}</h2></div>
         <div class="row-wrap"><div class="row" id="row-${rid}">
-          ${items.map(card).join('')}
+          ${items.map(card).join('')}${more}
         </div>
         <button class="row-nav l" type="button" aria-label="Scroll left" onclick="scrollRow(this,-1)"><svg class="ic"><use href="#i-chev"/></svg></button>
         <button class="row-nav r" type="button" aria-label="Scroll right" onclick="scrollRow(this,1)"><svg class="ic"><use href="#i-chev"/></svg></button>
@@ -313,7 +357,7 @@
         .sort((a, b) => allCats.indexOf(a) - allCats.indexOf(b));
       const byCat = new Map(shown.map((c) => [c.id, []]));
       movies.forEach((m) => { const l = byCat.get(catOf(m)); if (l) l.push(m); });
-      catRows = shown.map((c) => rowHtml(c.label, byCat.get(c.id).sort((a, b) => a._k.localeCompare(b._k)), 18, catHref(c.id))).join('');
+      catRows = shown.map((c) => rowHtml(c.label, byCat.get(c.id).sort((a, b) => a._k.localeCompare(b._k)), ROW_LIMIT, catHref(c.id) + '&sort=name&dir=asc')).join('');
       if (allCats.length > shown.length) catMore = `<div class="cat-more"><a class="btn ghost" href="#/browse">${allCats.length - shown.length} more categories in Browse</a></div>`;
     }
     const heroOv = '';
@@ -335,8 +379,7 @@
         </div>
       </div>
       ${rowHtml('Continue Watching', LF.progress.resumable().filter((id) => id !== hero.id).map(byId).filter(Boolean), 12)}
-      ${rowHtml('Recently Added', recent30, 16)}
-      ${rowHtml('All Movies', movies.slice().sort((a, b) => a._k.localeCompare(b._k)), 24)}
+      ${rowHtml('Recently Added', addedSort, ROW_LIMIT, '#/browse?cat=&sort=added&dir=desc')}
       ${catRows}${catMore}
     </div>`;
     settleImages(main);
@@ -599,7 +642,8 @@
       };
     }, (err) => {
       // The laptop did not answer: say so in plain words instead of silently doing nothing.
-      LF.notice({ title: err && err.offline ? 'Cannot reach your laptop' : 'Something went wrong',
+      if (err && err.offline) { LF.notice({ offline: true }); location.replace('#' + (LF.pageHash || '/')); return; }
+      LF.notice({ title: 'Something went wrong',
         text: err && err.friendly ? err.message : 'Settings could not be opened. Please try again.', retry: showSettings });
     });
   }
@@ -1069,33 +1113,35 @@
       LF.movies = prep(movies); LF.info = info; LF.offline = false;
     } catch (err) {
       LF.offline = true;
-      if (!LF.movies) { LF.movies = []; $('#main').innerHTML = errorState(err.message); return false; }
+      if (!LF.movies.length) { $('#main').innerHTML = errorState(err.message); return false; }
     }
     if (render !== false) route(true);
     return true;
   };
   let pollTimer, polls = 0;
+  // Re-reads the library. Only a changed list of movies re-renders the page. A finished poster is swapped in place,
+  // otherwise the page (and the TV focus ring) would be rebuilt every few seconds while posters download.
+  LF.refresh = async function () {
+    const sig = () => LF.movies.map((m) => m.id + ':' + (m.cat || '') + ':' + (m.category || '')).join('|');
+    const before = sig(); const old = new Map(LF.movies.map((m) => [m.id, m.pv]));
+    const [movies, info] = await Promise.all([LF.api('/api/movies'), LF.api('/api/info')]);
+    LF.movies = prep(movies); LF.info = info;
+    if (sig() !== before && !modalEl && !(LF.player && LF.player.active) && document.activeElement !== sq()) route(true);
+    else LF.movies.forEach((m) => {
+      if (old.get(m.id) === m.pv) return;
+      document.querySelectorAll(`.poster[data-id="${m.id}"]`).forEach((p) => {
+        const img = p.querySelector('img[data-p]'); if (img) img.remove();
+        const ph = p.querySelector('.ph'); if (ph) { ph.classList.remove('shim'); if (m.poster === 'ready') ph.innerHTML = ''; }
+        if (m.poster === 'ready') { const ni = document.createElement('img'); ni.dataset.p = '1'; ni.alt = ''; ni.decoding = 'async'; ni.src = posterUrl(m); ni.addEventListener('load', () => ni.classList.add('ld')); p.insertBefore(ni, p.firstChild); }
+      });
+    });
+  };
   async function tick() {
     const delay = LF.info && LF.info.poster_pending > 0 && polls < 60 ? 3500 : 45000;
     pollTimer = setTimeout(async () => {
       polls++;
-      try {
-        // Only a changed list of movies re-renders the page. A finished poster is swapped in place below,
-        // otherwise the page (and the TV focus ring) would be rebuilt every few seconds while posters download.
-        const sig = () => LF.movies.map((m) => m.id + ':' + (m.cat || '') + ':' + (m.category || '')).join('|');
-        const before = sig(); const old = new Map(LF.movies.map((m) => [m.id, m.pv]));
-        const [movies, info] = await Promise.all([LF.api('/api/movies'), LF.api('/api/info')]);
-        LF.movies = prep(movies); LF.info = info;
-        if (sig() !== before && !modalEl && !(LF.player && LF.player.active) && document.activeElement !== sq()) route(true);
-        else LF.movies.forEach((m) => {
-          if (old.get(m.id) === m.pv) return;
-          document.querySelectorAll(`.poster[data-id="${m.id}"]`).forEach((p) => {
-            const img = p.querySelector('img[data-p]'); if (img) img.remove();
-            const ph = p.querySelector('.ph'); if (ph) { ph.classList.remove('shim'); if (m.poster === 'ready') ph.innerHTML = ''; }
-            if (m.poster === 'ready') { const ni = document.createElement('img'); ni.dataset.p = '1'; ni.alt = ''; ni.decoding = 'async'; ni.src = posterUrl(m); ni.addEventListener('load', () => ni.classList.add('ld')); p.insertBefore(ni, p.firstChild); }
-          });
-        });
-      } catch { /* offline */ }
+      // While the laptop is unreachable the quiet reconnect loop (recover) is in charge, not this poll.
+      if (LF.online) { try { await LF.refresh(); } catch { /* LF.api already switched to the quiet reconnect loop */ } }
       tick();
     }, delay);
   }
@@ -1133,6 +1179,7 @@
     $('#main').innerHTML = '<div class="page"><div class="grid" style="margin-top:40px">' + '<div class="skel"></div>'.repeat(20) + '</div></div>';
     window.addEventListener('hashchange', () => { LF.routed = true; route(); });
     const ok = await LF.load(false);
-    if (ok) { route(true); LF.routed = true; tick(); }
+    if (ok) { route(true); LF.routed = true; }
+    tick();
   };
 })();

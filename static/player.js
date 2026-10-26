@@ -141,10 +141,10 @@
       det = null;
       if (err && err.offline) {
         clearTimeout(slow);
-        // Back to the page underneath (the page keeps working from what it already knows), then explain kindly.
+        // Back to the page underneath (the page keeps working from what it already knows). No dialog: a short toast,
+        // the page's quiet reconnect loop does the rest.
         location.replace('#' + (LF.pageHash || '/'));
-        setTimeout(() => LF.notice({ keepHash: true, title: 'Cannot play right now', text: LF.OFFLINE_MSG,
-          retry: () => P.open(movie, opts) }), 120);
+        LF.notice({ offline: true });
         return;
       }
     }

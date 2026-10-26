@@ -202,10 +202,13 @@ body:not(.pointer) .card:focus-visible .poster{box-shadow:var(--ring-card)}
   text-align:left;padding:12px;gap:4px;
   background:linear-gradient(transparent 40%,rgba(0,0,0,.8));
 }
-.ph b{font-size:.85rem;line-height:1.2;font-weight:700;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
-.ph small{opacity:.65;font-size:.78rem}
 .ph.shim::after{content:"";position:absolute;inset:0;background:linear-gradient(100deg,transparent 30%,rgba(255,255,255,.06) 50%,transparent 70%);animation:shim 1.8s infinite;border-radius:var(--r-card)}
 @keyframes shim{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
+.card-more .poster{display:grid;place-items:center;background:var(--surface2);border:1px solid rgba(255,255,255,.14)}
+.more-in{display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px;text-align:center}
+.more-in .ic{width:34px;height:34px}
+.more-in b{font-size:.95rem;font-weight:700}
+.more-in small{color:var(--muted);font-size:.78rem}
 .badges{position:absolute;left:8px;top:8px;display:flex;flex-direction:column;gap:4px;pointer-events:none;z-index:2}
 .badge{font-size:.62rem;font-weight:700;letter-spacing:.06em;padding:2px 6px;border-radius:4px;background:rgba(0,0,0,.75);color:#fff;backdrop-filter:blur(4px);align-self:flex-start}
 .badge.cc{background:rgba(255,255,255,.15);color:#dde2ee;border:1px solid rgba(255,255,255,.2)}
@@ -297,6 +300,8 @@ body:not(.pointer) .card:focus-visible .poster{box-shadow:var(--ring-card)}
 .msg.err{background:rgba(255,71,87,.12);color:#ffb0b0}
 .msg.ok{background:rgba(0,196,140,.12);color:#9be8bd}
 .toasts{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:400;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}
+.connpill{position:fixed;top:14px;right:18px;z-index:390;background:rgba(18,20,28,.92);border:1px solid var(--line2);border-radius:999px;padding:7px 14px;font-size:.78rem;color:rgba(255,255,255,.75);pointer-events:none}
+.connpill[hidden]{display:none}
 .toast{background:#1e2330;border:1px solid var(--line2);padding:12px 18px;border-radius:12px;box-shadow:0 10px 40px rgba(0,0,0,.6);animation:fade .15s;max-width:90vw;font-size:.9rem}
 
 /* ---- player ---- */
@@ -608,4 +613,5 @@ html.lftv .modal{box-shadow:none}
 html.lftv .scrim{padding:var(--safe-y) var(--safe-x);background:rgba(0,0,0,.88)}
 html.lftv .modal{max-height:calc(100vh - 2 * var(--safe-y))}
 html.lftv .toasts{bottom:calc(var(--safe-y) + 8px)}
+html.lftv .connpill{top:calc(var(--safe-y) + 4px);right:calc(var(--safe-x) + 4px)}
 html.lftv .sugg{box-shadow:none}

@@ -521,17 +521,7 @@ If subtitles are early or late:
 
 ## 13. Auto-start when Windows boots
 
-Start LocalFlix quietly in the background every time you sign in — so the TV always works without opening PowerShell:
-
-```powershell
-py localflix.py --autostart
-```
-
-To remove auto-start:
-
-```powershell
-py localflix.py --no-autostart
-```
+Use the TV monitor instead: it starts the server only while you are home and your TV is on the Wi-Fi, and stops it afterwards. Setup is in [TV_AUTOSTART_GUIDE.md](TV_AUTOSTART_GUIDE.md).
 
 ---
 
@@ -674,10 +664,6 @@ py localflix.py --no-browser
 # First-time firewall setup (Administrator PowerShell)
 py localflix.py --firewall
 .\fix_firewall.ps1
-
-# Windows auto-start on login
-py localflix.py --autostart
-py localflix.py --no-autostart
 
 # Custom port
 py localflix.py --port 9090

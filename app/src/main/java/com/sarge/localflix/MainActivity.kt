@@ -36,6 +36,7 @@ import androidx.lifecycle.lifecycleScope
 import com.sarge.localflix.databinding.ActivityMainBinding
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -59,6 +60,9 @@ class MainActivity : FragmentActivity() {
     private var pageFailed = false           // main frame failed -> the native connect screen is shown
     @Volatile private var pageAtRoot = true  // reported by the page through LocalFlixTV.atRoot()
     private var startJob: Job? = null
+    private var autoJob: Job? = null         // silent retry while the connect screen is up
+    private var rescanJob: Job? = null       // silent re-discovery requested by the page (laptop not answering)
+    private var lastRescanAt = 0L
     private var playerOpen = false
 
     // The native player returns the final position here; we hand it to the page (see LF.onNativePlayerClosed).
@@ -92,6 +96,8 @@ class MainActivity : FragmentActivity() {
 
     override fun onDestroy() {
         startJob?.cancel()
+        autoJob?.cancel()
+        rescanJob?.cancel()
         webView?.destroy()
         webView = null
         super.onDestroy()
@@ -105,6 +111,7 @@ class MainActivity : FragmentActivity() {
      */
     private fun startFlow() {
         startJob?.cancel()
+        autoJob?.cancel()
         startJob = lifecycleScope.launch {
             val saved = savedUrl()
             if (saved.isNotEmpty()) {
@@ -123,6 +130,49 @@ class MainActivity : FragmentActivity() {
             else
                 "Cannot reach $saved.\nIs your laptop on and LocalFlix running?\n\nPress Retry, or type a new address."
             showConnect(msg, busy = false, manual = true, prefill = saved)
+            startAutoRetry()
+        }
+    }
+
+    /** Finds the laptop without touching the screen: saved address first, then a UDP broadcast. Returns its URL or null. */
+    private suspend fun quietFind(): String? {
+        val saved = savedUrl()
+        if (saved.isNotEmpty() && checkServer(saved)) return saved
+        val found = Discovery.find(applicationContext)
+        return if (found != null && checkServer(found.url)) found.url else null
+    }
+
+    /**
+     * The connect screen is already showing: keep looking for the laptop in the background and open LocalFlix by itself
+     * the moment it answers. Nothing is shown or changed while it tries, so the user is never interrupted.
+     */
+    private fun startAutoRetry() {
+        autoJob?.cancel()
+        autoJob = lifecycleScope.launch {
+            var wait = 6_000L
+            while (true) {
+                delay(wait)
+                val url = quietFind()
+                if (url != null) { saveUrl(url); openWeb(url); return@launch }
+                wait = (wait * 3 / 2).coerceAtMost(20_000L)
+            }
+        }
+    }
+
+    /**
+     * Called by the page (LocalFlixTV.rescan) while the laptop does not answer: look for it again in the background.
+     * Only does something when the laptop came back on a NEW address (e.g. the router gave it another IP).
+     * Never shows a dialog or the connect screen; throttled so it cannot run more than every 20 seconds.
+     */
+    private fun backgroundRescan() {
+        val now = System.currentTimeMillis()
+        if (rescanJob?.isActive == true || now - lastRescanAt < 20_000L) return
+        lastRescanAt = now
+        rescanJob = lifecycleScope.launch {
+            val found = Discovery.find(applicationContext) ?: return@launch
+            if (found.url == serverUrl || !checkServer(found.url)) return@launch
+            saveUrl(found.url)
+            if (!playerOpen && b.connectPanel.visibility != View.VISIBLE) openWeb(found.url)
         }
     }
 
@@ -133,6 +183,7 @@ class MainActivity : FragmentActivity() {
             return
         }
         startJob?.cancel()
+        autoJob?.cancel()
         startJob = lifecycleScope.launch {
             showConnect("Checking $url ...", busy = true, manual = true, prefill = url)
             if (checkServer(url)) {
@@ -156,6 +207,7 @@ class MainActivity : FragmentActivity() {
     /** Menu key, or the web Settings > "Change TV server..." button. */
     private fun showChangeServer() {
         startJob?.cancel()
+        autoJob?.cancel()
         showConnect("Enter the address shown in the LocalFlix window on your laptop.", busy = false, manual = true, prefill = savedUrl())
     }
 
@@ -178,6 +230,7 @@ class MainActivity : FragmentActivity() {
     }
 
     private fun openWeb(url: String) {
+        autoJob?.cancel()
         serverUrl = url
         pageFailed = false
         showWeb()
@@ -264,6 +317,7 @@ class MainActivity : FragmentActivity() {
     private fun pageError(message: String) {
         pageFailed = true
         showConnect(message, busy = false, manual = true, prefill = serverUrl)
+        startAutoRetry()
     }
 
     private fun rebuildWebView() {
@@ -295,6 +349,9 @@ class MainActivity : FragmentActivity() {
 
         /** Settings > "Change TV server..." */
         @JavascriptInterface fun changeServer() = runOnUiThread { showChangeServer() }
+
+        /** The page cannot reach the laptop: look for it again quietly (see backgroundRescan). */
+        @JavascriptInterface fun rescan() = runOnUiThread { backgroundRescan() }
 
         /** The page keeps text fields silent until OK is pressed, then asks for the on-screen keyboard. */
         @JavascriptInterface fun showKeyboard() = runOnUiThread {
@@ -420,7 +477,7 @@ class MainActivity : FragmentActivity() {
     private fun handleBack() {
         if (b.connectPanel.visibility == View.VISIBLE) {
             // From "Change server": go back to the page if it is fine, otherwise leave the app.
-            if (webLoaded && !pageFailed) { startJob?.cancel(); showWeb() } else finish()
+            if (webLoaded && !pageFailed) { startJob?.cancel(); autoJob?.cancel(); showWeb() } else finish()
             return
         }
         val wv = webView ?: run { finish(); return }

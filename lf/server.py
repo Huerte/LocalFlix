@@ -87,8 +87,10 @@ def start_mdns(port):
         zc.register_service(info)
         return zc  # caller must keep a reference or it gets garbage-collected
     except ImportError:
-        return None  # zeroconf not installed — fail silently
-    except Exception:
+        print("   (mDNS off: run  py -m pip install zeroconf  to enable localflix.local)")
+        return None
+    except Exception as exc:
+        print(f"   (mDNS could not start: {exc})")
         return None
 
 
@@ -134,6 +136,8 @@ def create_app():
     @app.route("/")
     def index():
         r = send_from_directory(app.static_folder, "index.html")
+        r.headers["Cache-Control"] = "no-cache"
+        return r
 
     @app.route("/qr")
     def qr_page():
@@ -183,12 +187,12 @@ def create_app():
   <div id="qr-wrap"><canvas id="qr"></canvas></div>
   <div class="methods">
     <div class="method">
-      <div class="lbl">Hostname <span class="badge best">Recommended</span></div>
+      <div class="lbl">Hostname <span class="badge ok">Apple / Windows</span></div>
       <div class="val"><a href="{local_url}">{local_url}</a></div>
-      <div class="note">Works without knowing the IP. Supported on iOS, Windows, macOS and newer Android.</div>
+      <div class="note">Works on iPhone/iPad, macOS and Windows. Most Android phones and Android TVs can NOT resolve .local names - use the IP below.</div>
     </div>
     <div class="method">
-      <div class="lbl">Direct IP address <span class="badge ok">Always works</span></div>
+      <div class="lbl">Direct IP address <span class="badge best">Android / TV / any</span></div>
       <div class="val"><a href="{url}">{url}</a></div>
       <div class="note">Use this if the hostname above does not connect. This IP may change when Wi-Fi reconnects.</div>
     </div>
@@ -220,9 +224,6 @@ def create_app():
   </script>
 </body></html>"""
         return Response(html, mimetype="text/html")
-
-        r.headers["Cache-Control"] = "no-cache"
-        return r
 
     # ------------------------------------------------------------------ api
     @app.route("/api/info")

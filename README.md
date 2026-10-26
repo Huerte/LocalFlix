@@ -11,21 +11,37 @@ No account. No subscription. No internet required during playback.
 
 ---
 
+## Quick checklist (new laptop + new TV)
+
+Do these in order. Each item links to a detailed section.
+
+- [ ] Install Python, tick "Add python.exe to PATH" -> [Section 2](#2-install-python)
+- [ ] `pip install -r requirements.txt` -> [Section 3](#3-install-localflix-dependencies)
+- [ ] Install ffmpeg -> [Section 4](#4-install-ffmpeg-recommended)
+- [ ] Put movies in one folder -> [Section 5](#5-organise-your-movie-files)
+- [ ] Run `py localflix.py` once -> [Section 6](#6-first-run)
+- [ ] Open the firewall (2 steps, as Administrator) -> [Section 7](#7-allow-phones-and-tvs-to-connect-firewall)
+- [ ] Give the laptop a **permanent IP address** -> [Section 8](#8-give-your-laptop-a-permanent-address)
+- [ ] Open the address on phone / TV -> [Section 9](#9-open-on-a-phone-or-tablet), [Section 10](#10-open-on-a-smart-tv--android-tv)
+
+---
+
 ## Table of Contents
 
 1. [What you need](#1-what-you-need)
 2. [Install Python](#2-install-python)
 3. [Install LocalFlix dependencies](#3-install-localflix-dependencies)
-4. [Install ffmpeg (for frame grabs + compat mode)](#4-install-ffmpeg-recommended)
+4. [Install ffmpeg](#4-install-ffmpeg-recommended)
 5. [Organise your movie files](#5-organise-your-movie-files)
 6. [First run](#6-first-run)
 7. [Allow phones and TVs to connect (Firewall)](#7-allow-phones-and-tvs-to-connect-firewall)
-8. [Open on a phone or tablet](#8-open-on-a-phone-or-tablet)
-9. [Open on a Smart TV / Android TV](#9-open-on-a-smart-tv--android-tv)
-10. [Install the Android TV app (optional, better TV experience)](#10-install-the-android-tv-app-optional)
-11. [Subtitles](#11-subtitles)
-12. [Auto-start when Windows boots](#12-auto-start-when-windows-boots)
-13. [Troubleshooting](#13-troubleshooting)
+8. [Give your laptop a permanent address](#8-give-your-laptop-a-permanent-address)
+9. [Open on a phone or tablet](#9-open-on-a-phone-or-tablet)
+10. [Open on a Smart TV / Android TV](#10-open-on-a-smart-tv--android-tv)
+11. [Install the Android TV app (optional)](#11-install-the-android-tv-app-optional)
+12. [Subtitles](#12-subtitles)
+13. [Auto-start when Windows boots](#13-auto-start-when-windows-boots)
+14. [Troubleshooting](#14-troubleshooting)
 
 ---
 
@@ -57,13 +73,20 @@ py --version
 
 ## 3. Install LocalFlix dependencies
 
-Open PowerShell in the LocalFlix folder (right-click the folder → "Open in Terminal") and run:
+Open PowerShell in the LocalFlix folder (right-click the folder -> "Open in Terminal") and run:
 
 ```powershell
-pip install flask waitress charset-normalizer
+py -m pip install -r requirements.txt
 ```
 
-Flask is the web server. Waitress makes it production-grade. charset-normalizer handles non-English subtitles correctly.
+This installs:
+
+| Package | What it does |
+|---|---|
+| `flask` | The web server (required) |
+| `waitress` | A faster, more stable server |
+| `charset-normalizer` | Reads non-English subtitle files correctly |
+| `zeroconf` | Lets iPhone, Mac and Windows open `http://localflix.local:8080` (optional, see Section 9) |
 
 ---
 
@@ -126,7 +149,7 @@ Open PowerShell in the LocalFlix folder and run:
 py localflix.py
 ```
 
-You should see:
+You should see something like this:
 
 ```
 --------------------------------------------------------------
@@ -137,12 +160,16 @@ You should see:
  ffmpeg     : found
 --------------------------------------------------------------
  This computer   ->  http://localhost:8080
- Phone / TV      ->  http://192.168.1.33:8080
+ Apple/Windows   ->  http://localflix.local:8080
+ Direct IP       ->  http://192.168.1.33:8080
+
+ Android / TV: scan the QR at  http://localhost:8080/qr
 --------------------------------------------------------------
  Press Ctrl+C to stop.
 ```
 
-The browser opens automatically on your laptop. Write down the **Phone / TV** address — you will need it on all other devices.
+The browser opens on your laptop. The **Direct IP** line is the address you type on Android phones and TVs.
+(Your IP numbers will be different. That is normal.)
 
 ### Use a different movies folder
 
@@ -199,98 +226,211 @@ Restart `py localflix.py` after running the fix.
 
 ---
 
-## 8. Open on a phone or tablet
+## 8. Give your laptop a permanent address
 
-1. Make sure your phone is on the **same Wi-Fi network** as the laptop
-2. Open Chrome, Firefox, or Safari
-3. Type the address shown in the terminal, e.g. `http://192.168.1.33:8080`
-4. Your movie library loads in the browser
+### Why this matters
 
-**Tip:** On Android Chrome, tap the 3-dot menu → **Add to Home screen** to create a shortcut that looks like a native app.
+Your router uses **DHCP**: every time a device connects, the router can give it a different IP address.
+If the laptop IP changes, the address saved on your phone and TV stops working.
 
-### If the IP address changes after reconnecting
+You only need to fix the **laptop**. Phones and TVs can have any IP they like.
 
-Your laptop may get a new IP from the router each time. Either:
-- Run `py localflix.py` — it always prints the current address
-- Or check: PowerShell → `ipconfig` → look for "IPv4 Address" under your Wi-Fi adapter
-- Or set a **static IP** (see the Troubleshooting section)
+Choose **one** of the two options below. Option A is cleaner. Option B always works.
+
+### Step 1 - Find the laptop information
+
+Open PowerShell and run:
+
+```powershell
+ipconfig /all
+```
+
+Find the section **Wireless LAN adapter Wi-Fi** and write down:
+
+| Item | Example | Where to find it |
+|---|---|---|
+| IPv4 Address | `192.168.1.33` | Your current IP |
+| Subnet Mask | `255.255.255.0` | Same line group |
+| Default Gateway | `192.168.1.1` | This is your router. You open it in a browser to change settings |
+| Physical Address | `A1-B2-C3-D4-E5-F6` | This is the **MAC address** of the laptop |
+
+### Step 2 - Turn off random Wi-Fi addresses
+
+Windows can use a random MAC address for privacy. If it does, the router will not recognise your laptop.
+
+1. Settings -> **Network & internet** -> **Wi-Fi**
+2. Click your Wi-Fi network name
+3. Set **Random hardware addresses** to **Off**
+
+### Option A - Reserve the IP in the router (recommended)
+
+You tell the router: "always give this MAC address the same IP."
+
+1. On the laptop, open a browser and go to `http://192.168.1.1` (use your Default Gateway). Log in. The password is often printed on a sticker on the router.
+2. Find the **LAN Settings** page. Look at the **DHCP Start IP** and **End IP**. This is the range the router gives out.
+   Example: Start `192.168.1.33`, End `192.168.1.254`.
+3. Click **Edit Reserved IP Address** (the name can be different, for example "Address Reservation", "Static DHCP" or "DHCP Binding").
+4. In the table, enter:
+   - **IP address:** your current laptop IP, for example `192.168.1.33`
+   - **MAC address:** the Physical Address from Step 1
+5. Click **Add**. The new row must appear in the table. Then click **Apply Changes** or **Save** on the main page. Some routers restart. Wait 1-2 minutes.
+6. Turn the laptop Wi-Fi off, wait 10 seconds, turn it on. Run `ipconfig` to check the IP is the same.
+
+Tips if the new row does not appear:
+- Many routers accept only an IP **inside** the DHCP range. Use the IP the laptop already has (which is inside the range), not a random lower number.
+- Try the MAC address in another format: with dashes `A1-B2-C3-D4-E5-F6`, with colons `A1:B2:C3:D4:E5:F6`, or without symbols `A1B2C3D4E5F6`. Use capital letters.
+- Refresh the page after clicking Add.
+- If it still fails, use Option B.
+
+### Option B - Set a fixed IP on the laptop (always works)
+
+You tell Windows to stop asking the router and to use one fixed address.
+
+Choose an IP that is **outside** the router DHCP range, so no other device can take it.
+Example: if the range starts at `.33`, use `192.168.1.10`.
+
+1. Press the Windows key, type `ncpa.cpl`, press Enter
+2. Right-click **Wi-Fi** -> **Properties**
+3. Double-click **Internet Protocol Version 4 (TCP/IPv4)**
+4. Select **Use the following IP address** and enter:
+
+   | Field | Value |
+   |---|---|
+   | IP address | `192.168.1.10` |
+   | Subnet mask | `255.255.255.0` |
+   | Default gateway | `192.168.1.1` |
+
+5. Select **Use the following DNS server addresses** and enter:
+
+   | Field | Value |
+   |---|---|
+   | Preferred DNS | `8.8.8.8` |
+   | Alternate DNS | `1.1.1.1` |
+
+6. Click **OK**, then **Close**
+7. Run `ipconfig` and check **IPv4 Address** is `192.168.1.10`
+
+> **Warning:** this setting stays on the Wi-Fi adapter for every network. At school, work or a cafe, go back to
+> **Obtain an IP address automatically** and **Obtain DNS server address automatically**, or the internet will not work.
+>
+> To go back to normal at any time: same window -> choose both "Obtain ... automatically" options -> OK.
+
+### Step 3 - Restart LocalFlix and check
+
+1. In the LocalFlix window press **Ctrl+C**, then run `py localflix.py`
+2. The **Direct IP** line must show your permanent address, for example `http://192.168.1.10:8080`
+3. Use this address on all your devices. It will not change any more.
 
 ---
 
-## 9. Open on a Smart TV / Android TV
+## 9. Open on a phone or tablet
+
+1. Make sure the phone is on the **same Wi-Fi network** as the laptop
+2. Open Chrome, Firefox or Safari
+3. Type the **Direct IP** address, for example `http://192.168.1.10:8080`
+4. Your movie library opens
+
+**Tip:** In Android Chrome, tap the 3-dot menu -> **Add to Home screen**. You get an icon that opens LocalFlix like an app.
+
+### Three ways to connect
+
+| Method | Address | iPhone / iPad | Android phone | Android TV / Smart TV | Mac / Windows |
+|---|---|---|---|---|---|
+| Direct IP | `http://192.168.1.10:8080` | Yes | **Yes** | **Yes** | Yes |
+| QR code | `http://localhost:8080/qr` (open on laptop) | Yes | **Yes** | Scan with a phone | Yes |
+| Name (mDNS) | `http://localflix.local:8080` | Yes | **Usually no** | **Usually no** | Yes |
+
+**Why does `localflix.local` not work on Android?**
+A `.local` name only works if the device asks the local network "who is localflix.local?" (this is called mDNS).
+iPhone, Mac and Windows do that. Android Chrome and most Android TVs do not. They ask the router DNS, the router does not know
+the name, and Chrome shows `DNS_PROBE_FINISHED_NXDOMAIN`. This is an Android limitation. It is not a LocalFlix error and not a mistake in your setup.
+**On Android, always use the IP address (and make it permanent with Section 8).**
+
+### Using the QR code
+
+1. On the laptop, open `http://localhost:8080/qr` (or click the QR icon at the top right of LocalFlix)
+2. Scan the code with your phone camera
+3. It opens the current IP address. Nothing to type.
+
+---
+
+## 10. Open on a Smart TV / Android TV
 
 Most Smart TVs have a built-in browser (Samsung, LG, Sony, Hisense).
 
 ### Using the built-in TV browser
 
-1. On the TV, open the **Internet** or **Browser** app (usually in the app list)
-2. Navigate to: `http://192.168.1.33:8080` (your laptop's address)
-3. Use the remote to browse
+1. Open the **Internet** or **Browser** app on the TV
+2. Type the **Direct IP** address, for example `http://192.168.1.10:8080` (do not use `localflix.local`)
+3. Use the remote control to browse
 
-### Remote control navigation
+### Remote control
 
 | Remote button | Action |
 |---|---|
-| Directional pad (arrow keys) | Move between movie cards |
+| Arrow keys | Move between movie cards |
 | OK / Select / Enter | Open a movie / confirm |
 | Back | Close player / go back |
-| Left / Right while playing | Skip back 10s / forward 10s |
-| Up / Down while playing | Volume up/down |
-| Double-tap OK on video | Toggle fullscreen |
-| Back button | Exit player, back to library |
+| Left / Right while playing | Back 10s / forward 10s |
+| Up / Down while playing | Volume up / down |
+| Double-press OK on video | Fullscreen on / off |
 
-**Focus is always visible** — the selected card has a bright blue glow so you always know where the remote cursor is.
+The selected card has a bright blue glow, so you always see where the cursor is.
+
+### New TV checklist
+
+1. TV is on the **same Wi-Fi** as the laptop (not a guest network)
+2. LocalFlix is running on the laptop
+3. Firewall done (Section 7)
+4. Laptop address is permanent (Section 8)
+5. Type the Direct IP in the TV browser, or use the TV app (Section 11)
 
 ---
 
-## 10. Install the Android TV app (optional)
+## 11. Install the Android TV app (optional)
 
-The Android TV app gives a native 10-foot interface with ExoPlayer. This is the best experience on a TV box or Android TV device.
+The Android TV app gives a native TV interface with ExoPlayer. It is the best experience on a TV box or Android TV.
+The app can also find the laptop automatically on the same Wi-Fi (it sends a UDP broadcast on port 50505), so you may not need to type the address.
 
 ### Requirements
 
-- Android Studio (free from https://developer.android.com/studio)
-- Your Android TV on the same Wi-Fi
+- Android Studio (free: https://developer.android.com/studio)
+- Android TV on the same Wi-Fi
 
 ### Build the APK
 
 1. Open Android Studio
-2. **File → Open** → select the LocalFlix project folder
-3. Wait for Gradle sync (first time downloads dependencies, takes a few minutes)
-4. **Build → Build Bundle(s) / APK(s) → Build APK(s)**
-5. APK saved to: `app\build\outputs\apk\debug\app-debug.apk`
+2. **File -> Open** -> select the LocalFlix project folder
+3. Wait for the Gradle sync (the first time it downloads files and takes a few minutes)
+4. **Build -> Build Bundle(s) / APK(s) -> Build APK(s)**
+5. The APK is here: `app\build\outputs\apk\debug\app-debug.apk`
 
-### Enable Developer Mode on the TV
+### Turn on Developer Mode on the TV
 
-1. Settings → Device Preferences → About
-2. Press OK on **Build** seven times quickly — *"You are now a developer"* appears
-3. Settings → Device Preferences → Developer options
-4. Enable **USB debugging** AND **ADB debugging over network**
-5. Note the IP shown, e.g. `192.168.1.20:5555`
+1. Settings -> Device Preferences -> About
+2. Press OK on **Build** seven times. A message says "You are now a developer".
+3. Settings -> Device Preferences -> Developer options
+4. Turn on **USB debugging** and **ADB debugging over network**
+5. Write down the IP shown, for example `192.168.1.20:5555`
 
-### Install via ADB (no USB cable needed)
-
-ADB comes with Android Studio. Open a terminal and:
+### Install with ADB (no USB cable)
 
 ```powershell
-# Connect to the TV over Wi-Fi
 adb connect 192.168.1.20:5555
-
-# Install the app
 adb install "app\build\outputs\apk\debug\app-debug.apk"
 ```
 
 The **LocalFlix** icon appears on the TV home screen.
 
-### First launch on the TV app
+### First start of the TV app
 
-1. Open LocalFlix
-2. Enter the server address: `http://192.168.1.33:8080`
-3. Press Connect — your movie library loads
+1. Open LocalFlix on the TV
+2. If it does not find the laptop by itself, enter the Direct IP, for example `http://192.168.1.10:8080`
+3. Press Connect
 
 ---
 
-## 11. Subtitles
+## 12. Subtitles
 
 ### Automatic matching
 
@@ -321,7 +461,7 @@ If subtitles are early or late:
 
 ---
 
-## 12. Auto-start when Windows boots
+## 13. Auto-start when Windows boots
 
 Start LocalFlix quietly in the background every time you sign in — so the TV always works without opening PowerShell:
 
@@ -337,7 +477,7 @@ py localflix.py --no-autostart
 
 ---
 
-## 13. Troubleshooting
+## 14. Troubleshooting
 
 ### Phone/TV gets ERR_CONNECTION_REFUSED
 
@@ -402,20 +542,52 @@ Inception (2010).mkv
 
 ---
 
-### Server shows a different IP each time (DHCP issue)
+### Android shows DNS_PROBE_FINISHED_NXDOMAIN on `localflix.local`
 
-Set a static IP on your laptop so the address never changes:
+Android does not support `.local` names in most cases. Use the IP address instead.
+Make it permanent with [Section 8](#8-give-your-laptop-a-permanent-address).
 
-1. Settings → Network & Internet → Wi-Fi → your network → Properties
-2. Under **IP assignment**, click **Edit**
-3. Switch to **Manual**
-4. Fill in:
-   - **IP address:** `192.168.1.200` (or any number above 100 that your router does not hand out via DHCP)
-   - **Subnet mask:** `255.255.255.0`
-   - **Gateway:** `192.168.1.1` (your router — check with `ipconfig`, look for "Default Gateway")
-5. Save
+---
 
-After this the address printed by LocalFlix will always be the same.
+### `http://<ip>:8080/qr` shows 404 or an error
+
+1. Stop LocalFlix (Ctrl+C) and start it again. An old running copy does not know new pages.
+2. Open `/qr` on the **laptop** first: `http://localhost:8080/qr`
+3. If `http://localhost:8080` itself shows an error (HTTP 500), update to the latest LocalFlix files.
+
+---
+
+### The IP address keeps changing
+
+Follow [Section 8](#8-give-your-laptop-a-permanent-address). Option A (router reservation) is best. Option B (fixed IP on the laptop) always works.
+
+---
+
+### I added a reserved IP in the router but nothing appears or nothing changes
+
+1. Use an IP **inside** the router DHCP range (the one the laptop already has)
+2. Check the MAC address is exactly the **Physical Address** from `ipconfig /all`, and try dashes, colons, or no symbols
+3. Turn **Random hardware addresses** Off in Windows Wi-Fi settings
+4. Click **Apply Changes** on the main LAN page, wait for the router to restart
+5. Turn Wi-Fi off and on, then run `ipconfig`
+6. Still not working? Use Option B
+
+---
+
+### After setting a fixed IP, the internet does not work
+
+Your DNS or gateway is wrong. Open `ncpa.cpl` -> Wi-Fi -> Properties -> IPv4 and check:
+Default gateway = your router IP (usually `192.168.1.1`), DNS = `8.8.8.8` and `1.1.1.1`.
+Or choose **Obtain ... automatically** to go back to normal.
+
+---
+
+### The phone can reach the laptop only sometimes
+
+The laptop may be asleep or on another IP. Check:
+1. LocalFlix is still running in PowerShell
+2. Windows power settings: do not let the laptop sleep while you watch
+3. `ipconfig` shows the address you expect
 
 ---
 
@@ -451,6 +623,9 @@ py localflix.py --no-autostart
 
 # Custom port
 py localflix.py --port 9090
+
+# Show the connect QR code (open on the laptop)
+# http://localhost:8080/qr
 ```
 
 ---

@@ -155,11 +155,11 @@ def main():
     if cfg.host != "127.0.0.1":
         _mdns = start_mdns(port)
         if _mdns:
-            print(f"   Any device      ->  http://localflix.local:{port}  (no IP needed — bookmark this)")
+            print(f"   Apple/Windows   ->  http://localflix.local:{port}  (Android phones/TVs usually can't resolve .local)")
         for i, ip in enumerate(lan_addresses()):
             label = "   Direct IP       ->" if i == 0 else "   Other network   ->"
             print(f"{label}  http://{ip}:{port}")
-        print(f"\n   Scan to connect:    http://localhost:{port}/qr  (open on this laptop, scan with phone)")
+        print(f"\n   Android / TV: scan the QR at  http://localhost:{port}/qr  (or reserve the laptop's IP in your router)")
         print("\n   Phone or TV cannot connect?  Run once as Administrator:")
         print("       py localflix.py --firewall  then  .\\fix_firewall.ps1")
         start_discovery(port)

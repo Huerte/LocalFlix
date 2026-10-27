@@ -17,6 +17,6 @@ This project is for people who want to watch their own movies on their own netwo
 
 ## Enforcement
 
-I can edit or remove comments, issues and pull requests, and I can block people who break these rules. To report a problem, contact me, [@Huerte](https://github.com/Huerte), through GitHub.
+I can edit or remove comments, issues and pull requests, and I can block people who break these rules. To report a problem, contact me, [@Huerte](https://github.com/Huerte).
 
 This applies in the repository and in any space where someone represents the project.

@@ -6,7 +6,7 @@ You do not need to know about computers. Follow the steps in order. Do one step 
 
 The first time, it takes about 45 to 90 minutes.
 
-> **Please read this honestly.** The LocalFlix program is normal Python code, so it should run on a phone. But the authors did not test every phone. Phones are different, and Android is different on every brand. If something does not work, go to the part called [Fixes for common problems on the phone](#fixes-for-common-problems-on-the-phone).
+> **I want to be honest with you.** The LocalFlix program is normal Python code, so it should run on a phone. But I did not test every phone. Phones are different, and Android is different on every brand. If something does not work, go to the part called [Fixes for common problems on the phone](#fixes-for-common-problems-on-the-phone).
 
 ## Before you start
 
@@ -162,7 +162,7 @@ pkg upgrade
 
 ## Step 3. Install Python and ffmpeg
 
-Python is a free program that LocalFlix needs to run. ffmpeg is a free helper program. LocalFlix works without it, but we suggest you install it. With ffmpeg, LocalFlix makes poster pictures from your videos.
+Python is a free program that LocalFlix needs to run. ffmpeg is a free helper program. LocalFlix works without it, but I suggest you install it. With ffmpeg, LocalFlix makes poster pictures from your videos.
 
 Type this and press Enter:
 
@@ -248,8 +248,8 @@ This means: "the folder called Movies inside the phone memory". Every folder **i
 You will download LocalFlix as a ZIP file, then open it.
 
 1. Open your phone browser (Chrome, for example).
-2. Open the LocalFlix page on GitHub.
-3. Tap the green **Code** button. Tap **Download ZIP**. A file called `LocalFlix-main.zip` goes to your **Downloads** folder. (If your browser shows the page as a small phone page, tap the three dots and choose **Desktop site**, then try again.)
+2. Open the **[latest release](https://github.com/Huerte/LocalFlix/releases/latest)** page.
+3. Scroll down to **Assets**. Tap **LocalFlix-Server.zip**. A file called `LocalFlix-Server.zip` goes to your **Downloads** folder. (Do not use the green **Code** button. It gives you the whole project, and you only need the server.)
 4. Go back to **Termux**.
 5. Check that the file is there. Type:
 
@@ -257,26 +257,26 @@ You will download LocalFlix as a ZIP file, then open it.
 ls ~/storage/downloads
 ```
 
-> **You should see:** `LocalFlix-main.zip` in the list. If you downloaded it two times, the name may be `LocalFlix-main (1).zip`. That is fine. Use the name you see in the next command.
+> **You should see:** `LocalFlix-Server.zip` in the list. If you downloaded it two times, the name may be `LocalFlix-Server (1).zip`. That is fine. Use the name you see in the next command.
 
 6. Copy it to Termux's own folder. Type this and press Enter:
 
 ```
-cp ~/storage/downloads/LocalFlix-main.zip ~/
+cp ~/storage/downloads/LocalFlix-Server.zip ~/
 ```
 
-If your file has another name, type that name instead. If the name has spaces, put quote marks around the path, like this: `cp "$HOME/storage/downloads/LocalFlix-main (1).zip" ~/`
+If your file has another name, type that name instead. If the name has spaces, put quote marks around the path, like this: `cp "$HOME/storage/downloads/LocalFlix-Server (1).zip" ~/`
 
 7. Open the ZIP file:
 
 ```
-unzip LocalFlix-main.zip
+unzip LocalFlix-Server.zip
 ```
 
 8. Go into the folder:
 
 ```
-cd LocalFlix-main
+cd LocalFlix-Server
 ```
 
 9. Check:
@@ -285,11 +285,11 @@ cd LocalFlix-main
 ls
 ```
 
-> **You should see:** files such as `localflix.py`, `README.md` and `requirements.txt`, and folders such as `docs` and `static`.
+> **You should see:** files such as `localflix.py`, `README.txt` and `requirements.txt`, and folders such as `lf` and `static`.
 
 > **If it does not work:**
 > - `No such file or directory`: Step 4 is not finished, or the ZIP file has another name. Type `ls ~/storage/downloads` and look at the name.
-> - If you only see one more folder called `LocalFlix-main` inside, type `cd LocalFlix-main` once more. The right folder is the one that has `localflix.py` inside.
+> - If you only see one more folder called `LocalFlix-Server` inside, type `cd LocalFlix-Server` once more. The right folder is the one that has `localflix.py` inside.
 
 **Do not delete or rename this folder later.** Some settings are saved inside it.
 
@@ -299,7 +299,7 @@ LocalFlix uses a few small free parts. This command downloads them. You need int
 
 > **Do not use** `py -m pip install -r requirements.txt` from the other guide. On a phone, one of the parts (`zeroconf`) may fail and stop the whole install. Use this command instead.
 
-Make sure you are in the LocalFlix folder (the line before `$` ends with `LocalFlix-main`). Type this and press Enter:
+Make sure you are in the LocalFlix folder (the line before `$` ends with `LocalFlix-Server`). Type this and press Enter:
 
 ```
 pip install flask waitress charset-normalizer
@@ -329,7 +329,7 @@ You can **skip** the part called `zeroconf`. It only gives the name `localflix.l
 1. Make sure you are in the LocalFlix folder. If you closed Termux, type:
 
 ```
-cd ~/LocalFlix-main
+cd ~/LocalFlix-Server
 ```
 
 2. Type this and press Enter. Use **your own** movie folder name instead of `Movies`:
@@ -520,11 +520,11 @@ The TV app plays more kinds of files and is made for the remote. But the app fil
 
 If you really want the app:
 
-1. Ask a friend, a relative or a computer shop to make the app file for you, one time. They follow [Android TV app](tv-app.md), Part 1. They give you the file `app-debug.apk` (on a USB stick, for example).
+1. Ask a friend, a relative or a computer shop to get the app file for you, one time. They follow [Android TV app](tv-app.md), Part 1. They only need to download `LocalFlix-TV.apk` from the [latest release](https://github.com/Huerte/LocalFlix/releases/latest). They give you the file (on a USB stick, for example).
 2. Put the file on the TV with a USB stick. The steps are in [Android TV app](tv-app.md).
-3. In the app, the TV tries to find the server by itself. This **may work** with a phone server, but it was not tested. If it does not find the phone, type the address by hand (the same numbers address as above) and press **Connect**.
+3. In the app, the TV tries to find the server by itself. This **may work** with a phone server, but I have not tested it. If it does not find the phone, type the address by hand (the same numbers address as above) and press **Connect**.
 
-> **DOES NOT WORK without a computer:** building the TV app, and the `adb` commands in the TV app guide.
+> **DOES NOT WORK without a computer:** the `adb` commands in the TV app guide, and building the TV app yourself.
 
 ### Before you open LocalFlix on the TV, check these
 
@@ -541,7 +541,7 @@ If you really want the app:
 1. Plug in the server phone. Connect it to the Wi-Fi.
 2. Open **Termux**.
 3. Type `termux-wake-lock` and press Enter.
-4. Type `cd ~/LocalFlix-main` and press Enter.
+4. Type `cd ~/LocalFlix-Server` and press Enter.
 5. Type `python localflix.py --movies "$HOME/storage/shared/Movies" --no-browser` and press Enter. (Tip: press the **up arrow** key in the extra row to bring back the last command.)
 6. Read the address again if it may have changed (Step 10.1).
 7. Open LocalFlix on your other phone or TV.
@@ -560,7 +560,7 @@ You can put the three start commands in one file. Then you type only one short l
 cat > ~/start-localflix.sh << 'EOF'
 #!/data/data/com.termux/files/usr/bin/sh
 termux-wake-lock
-cd "$HOME/LocalFlix-main"
+cd "$HOME/LocalFlix-Server"
 python localflix.py --movies "$HOME/storage/shared/Movies" --no-browser
 EOF
 chmod +x ~/start-localflix.sh
@@ -574,10 +574,10 @@ chmod +x ~/start-localflix.sh
 
 ## Update LocalFlix later
 
-When there is a new version, download the new ZIP file (Step 5). Stop LocalFlix first. Then rename the old folder: type `mv ~/LocalFlix-main ~/LocalFlix-old`. Open the new ZIP as in Step 5. If you want to keep your saved settings, copy the file `config.json` from the old folder into the new folder:
+When there is a new version, download the new ZIP file (Step 5). Stop LocalFlix first. Then rename the old folder: type `mv ~/LocalFlix-Server ~/LocalFlix-old`. Open the new ZIP as in Step 5. If you want to keep your saved settings, copy the file `config.json` from the old folder into the new folder:
 
 ```
-cp ~/LocalFlix-old/config.json ~/LocalFlix-main/
+cp ~/LocalFlix-old/config.json ~/LocalFlix-Server/
 ```
 
 If that command says the file does not exist, you have nothing to copy. That is fine.
@@ -677,7 +677,7 @@ termux-setup-storage
 termux-wake-lock
 
 # Start LocalFlix
-cd ~/LocalFlix-main
+cd ~/LocalFlix-Server
 python localflix.py --movies "$HOME/storage/shared/Movies" --no-browser
 
 # Start without using the internet

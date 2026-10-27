@@ -18,10 +18,19 @@ IMG_EXTS = (".jpg", ".jpeg", ".png", ".webp")
 
 
 # --------------------------------------------------------------------------- config
+def default_movies_dir():
+    """First guess for the movie folder, made from the current user's own home folder.
+    No user name or drive is written in the code. Anyone can pick another folder with --movies or in Settings."""
+    home = os.path.expanduser("~")
+    if os.name == "nt":
+        return os.path.join(home, "Videos", "Movies")
+    return os.path.join(home, "Movies")
+
+
 class Config:
     DEFAULTS = {
-        "movies_dir": r"C:\Users\hp\Videos\Movies",
-        "subtitle_dir": r"C:\Users\hp\Videos\Movies\subtitle",
+        "movies_dir": default_movies_dir(),
+        "subtitle_dir": "",   # empty = use the "subtitle" folder inside the movie folder, if there is one
         "port": 8080,
         "online_lookup": True,
         "tmdb_key": "",

@@ -1,7 +1,19 @@
-# Local configuration and library data
+# Local configuration and library data (server)
+/server/config.json
+/server/localflix_data/
+/server/ffmpeg.exe
+/server/ffprobe.exe
+# Same files at the repo root: where they were before the move into server/.
+# Kept so that an old config.json (with your own paths) can never be committed by mistake.
 /config.json
-/local.properties
 /localflix_data/
+/ffmpeg.exe
+/ffprobe.exe
+/tv_monitor.json
+/tv_monitor.server.pid
+/tv_monitor.log
+# Local Android SDK path (TV app)
+/android-tv/local.properties
 .env
 .env.*
 !.env.example
@@ -20,7 +32,7 @@ htmlcov/
 # Gradle and Android builds
 .gradle/
 **/build/
-/captures/
+/android-tv/captures/
 *.apk
 *.aab
 *.ap_
@@ -38,5 +50,10 @@ Thumbs.db
 *.log
 
 # TV monitor settings (your Wi-Fi name and TV address)
-/tv_monitor.json
-/tv_monitor.server.pid
+/server/tv_monitor.json
+/server/tv_monitor.server.pid
+/server/tv_monitor.log
+
+# Files made by the release workflow
+/LocalFlix-Server/
+/LocalFlix-Server.zip

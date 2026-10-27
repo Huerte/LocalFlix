@@ -10,32 +10,47 @@ It takes about 45 to 90 minutes the first time. You do it once.
 
 ## Before you start
 
-> **No laptop?** Making the app file needs Android Studio, and Android Studio runs only on a computer. A phone cannot do it. Ask someone with a computer to make the app file once, or use the TV browser. The app then works with a phone server. See [Use an Android phone as the server](phone-server.md#step-11-open-localflix-on-a-tv).
+> **No laptop?** Sending the app to the TV needs a computer once (a laptop, or a friend's computer). A phone cannot do it. Ask someone with a computer to install the app once, or use the TV browser. The app then works with a phone server. See [Use an Android phone as the server](phone-server.md#step-11-open-localflix-on-a-tv).
 
 You need:
 
 - LocalFlix working on the laptop. Finish [the setup guide](setup-guide.md) up to Step 8 first.
 - The TV on the same Wi-Fi as the laptop.
 - The address of your TV (you will find it in Part 2).
-- About 8 GB of free space on the laptop for Android Studio and the files it downloads.
+- About 8 GB of free space on the laptop, **only** if you build the app yourself with Android Studio (Part 1, Way B). Downloading the ready app file (Way A) needs almost nothing.
 
 ## How it works
 
-The LocalFlix project has the TV app inside it. You use a free program called **Android Studio** to turn the project into an **app file** (it ends with `.apk`). Then you send the app file to your TV.
+The TV app is an **app file** (it ends with `.apk`). You send this file to your TV.
 
-## Part 1. Make the app file
+I put a ready app file on the [Releases page](https://github.com/Huerte/LocalFlix/releases/latest), so you can download it. If you want to change the app, or you prefer to build it yourself, the source code is in the `android-tv` folder of the project, and you can build it with the free **Android Studio**.
 
-### 1.1 Install Android Studio
+## Part 1. Get the app file
+
+### Way A. Download it (easiest)
+
+1. Open the **[latest release](https://github.com/Huerte/LocalFlix/releases/latest)** page in your browser.
+2. Scroll down to **Assets**. Click **LocalFlix-TV.apk**. The file goes to your **Downloads** folder.
+
+> **If you do not see `LocalFlix-TV.apk` in the list:** I have not added the app file to that release yet. Use Way B, or open an issue and ask me.
+
+Now go to Part 2. You do not need Way B.
+
+### Way B. Build it yourself with Android Studio
+
+#### 1.1 Install Android Studio
 
 1. Open **https://developer.android.com/studio** in your browser.
 2. Download Android Studio. Open the file you downloaded.
 3. Follow the screens. Choose the standard choices. Click **Next** and **Finish**.
 4. Open Android Studio. The first time, it downloads more files. Wait until it finishes. This can take several minutes.
 
-### 1.2 Open the LocalFlix project
+#### 1.2 Open the LocalFlix project
+
+You need the whole project for this, not only the server ZIP. Open the [LocalFlix page on GitHub](https://github.com/Huerte/LocalFlix), click the green **Code** button, click **Download ZIP**, and extract it.
 
 1. In Android Studio, click **Open**. (If a project is already open, choose **File**, then **Open**.)
-2. Choose your **LocalFlix folder** (the one that has the `app` folder and `settings.gradle` inside).
+2. Choose the **`android-tv` folder** inside the project (the one that has the `app` folder and `settings.gradle` inside). Do not choose the main project folder.
 3. Click **OK**.
 4. If Android Studio asks "Trust this project?", click **Trust Project**.
 5. Wait. At the bottom of the window you see a progress bar. The first time, Android Studio downloads many files and this can take 5 to 15 minutes. Wait until the bar is gone.
@@ -44,7 +59,7 @@ The LocalFlix project has the TV app inside it. You use a free program called **
 > - A message says a part is missing (for example an Android "SDK platform") and has a blue link such as **Install**. Click the link and follow the screens.
 > - A red message says the sync failed. Check that you have internet. Click **Try Again** (or **File**, then **Sync Project with Gradle Files**).
 
-### 1.3 Build the app file
+#### 1.3 Build the app file
 
 1. In the top menu, click **Build**.
 2. Choose **Generate App Bundles or APKs**, then **Generate APKs**.
@@ -54,10 +69,10 @@ The LocalFlix project has the TV app inside it. You use a free program called **
 The app file is here:
 
 ```
-app\build\outputs\apk\debug\app-debug.apk
+android-tv\app\build\outputs\apk\debug\app-debug.apk
 ```
 
-This path starts inside your LocalFlix folder. Do not delete this file yet.
+This path starts inside the project folder. Do not delete this file yet.
 
 ## Part 2. Get the TV ready
 
@@ -80,7 +95,7 @@ Choose **Way A** first. If it does not work, use **Way B**.
 
 ADB is a small free tool that sends the app to the TV. Android Studio already put it on your laptop.
 
-1. Open **PowerShell in the LocalFlix folder** (see [the setup guide](setup-guide.md#b-open-powershell-in-the-localflix-folder)).
+1. Open PowerShell. If you built the app yourself (Way B), open it **in the `android-tv` folder** (open the folder in File Explorer, click the address bar, type `powershell`, press Enter). If you downloaded the app file (Way A), any PowerShell window is fine.
 2. Type this line and press Enter. It tells PowerShell where ADB is:
 
 ```powershell
@@ -97,6 +112,14 @@ $adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
 
 4. Look at the TV screen. It may ask **Allow USB debugging?** Choose **Always allow from this computer**, then **OK** (or **Allow**).
 5. Send the app:
+
+If you downloaded the app file (Way A):
+
+```powershell
+& $adb install -r "$env:USERPROFILE\Downloads\LocalFlix-TV.apk"
+```
+
+If you built it yourself (Way B), in PowerShell in the `android-tv` folder:
 
 ```powershell
 & $adb install -r "app\build\outputs\apk\debug\app-debug.apk"
@@ -116,10 +139,10 @@ The `-r` in the command keeps the saved server address when you update the app l
 
 ### Way B. Use a USB stick
 
-1. Copy `app-debug.apk` to a USB stick.
+1. Copy the app file (`LocalFlix-TV.apk`, or `app-debug.apk` if you built it) to a USB stick.
 2. Put the USB stick in the TV.
 3. On the TV, open a file manager app. If you do not have one, install a free one from the Play Store on the TV (for example "File Commander" or "X-plore").
-4. Open the USB stick and choose `app-debug.apk`.
+4. Open the USB stick and choose the app file.
 5. The TV may say it cannot install apps from this source. Choose **Settings**, and turn on **Allow from this source**. Go back and choose **Install**.
 
 The **LocalFlix** icon appears on the TV home screen.
@@ -160,11 +183,11 @@ In the player, the **Subtitles** and **Audio** buttons open a list. Subtitles st
 
 ## Update the app later
 
-Build a new app file (Part 1.3) and run the install command again (Part 3, Way A). The `-r` keeps your saved laptop address.
+Download the new `LocalFlix-TV.apk` from the [Releases page](https://github.com/Huerte/LocalFlix/releases/latest) (or build it again, Part 1.3) and run the install command again (Part 3, Way A). The `-r` keeps your saved laptop address.
 
 ## Test list
 
-Use this list after you build the app. It checks that everything works.
+Use this list after you install the app. It checks that everything works.
 
 1. New install, laptop running: the app finds the laptop by itself and shows the LocalFlix page (same colours, tabs, posters and search as the browser).
 2. New install, laptop **not** running: the connect screen shows, with **Retry** and an address box (not a browser error). Start LocalFlix, press **Retry**: it connects.

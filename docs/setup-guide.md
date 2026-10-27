@@ -92,7 +92,7 @@ Most steps need this one. It opens PowerShell already inside the LocalFlix folde
 2. Click the **address bar** at the top of the window. This is the long box that shows the folder address.
 3. The address turns blue. Type `powershell` and press **Enter**.
 
-A PowerShell window opens. The first line in the window ends with the name of your LocalFlix folder. We call this "PowerShell in the LocalFlix folder".
+A PowerShell window opens. The first line in the window ends with the name of your LocalFlix folder. I call this "PowerShell in the LocalFlix folder".
 
 On Windows 11 you can also right-click an empty place inside the folder and choose **Open in Terminal**.
 
@@ -143,17 +143,21 @@ py --version
 
 ## Step 2. Get LocalFlix
 
-1. Open the LocalFlix page on GitHub in your browser.
-2. Click the green **Code** button.
-3. Click **Download ZIP**. A ZIP file downloads.
-4. Open your **Downloads** folder. Right-click the ZIP file. Choose **Extract All**.
-5. Windows asks where to put the files. Click **Browse** and choose a place you will not delete, for example your **Documents** folder. Click **Extract**.
+I put the server in its own small ZIP file, so you do not need to download the whole project.
 
-You now have a folder called `LocalFlix-main`. This is your **LocalFlix folder**. Open it.
+1. Open the **[latest release](https://github.com/Huerte/LocalFlix/releases/latest)** page in your browser.
+2. Scroll down to **Assets**. Click **LocalFlix-Server.zip**. A ZIP file downloads.
+   - Do not use the green **Code** button on the main page. It gives you the whole project, with the TV app source and other files you do not need here.
+3. Open your **Downloads** folder. Right-click the ZIP file. Choose **Extract All**.
+4. Windows asks where to put the files. Click **Browse** and choose a place you will not delete, for example your **Documents** folder. Click **Extract**.
 
-> **You should see:** files such as `localflix.py`, `README.md` and `requirements.txt`, and folders such as `docs` and `static`.
+You now have a folder called `LocalFlix-Server`. This is your **LocalFlix folder**. Open it.
 
-> **If it does not work:** if you only see one more folder called `LocalFlix-main` inside, open that one. The LocalFlix folder is the one that has `localflix.py` inside.
+> **You should see:** files such as `localflix.py`, `README.txt` and `requirements.txt`, and folders such as `lf` and `static`.
+
+> **If it does not work:** if you only see one more folder called `LocalFlix-Server` inside, open that one. The LocalFlix folder is the one that has `localflix.py` inside.
+
+When I publish a new version, download the new ZIP the same way. Copy the file `config.json` from your old folder into the new one if you want to keep your settings.
 
 Do not move or rename this folder later. Some settings are saved inside it.
 
@@ -188,7 +192,7 @@ What these parts do:
 
 ## Step 4. Install ffmpeg
 
-ffmpeg is a free helper program. LocalFlix can work without it, but we strongly suggest you install it. With ffmpeg:
+ffmpeg is a free helper program. LocalFlix can work without it, but I strongly suggest you install it. With ffmpeg:
 
 - LocalFlix makes poster pictures from your videos.
 - LocalFlix can change a movie that your TV cannot play (for example AVI or WMV files) so that it plays.
@@ -345,10 +349,10 @@ The administrator window does not start in your LocalFlix folder. So you must go
 It looks like this (your address will be different):
 
 ```powershell
-cd "C:\Users\YourName\Documents\LocalFlix-main"
+cd "C:\Users\YourName\Documents\LocalFlix-Server"
 ```
 
-> **You should see:** the line in the window now ends with `LocalFlix-main>`.
+> **You should see:** the line in the window now ends with `LocalFlix-Server>`.
 
 ### 7.3 Allow LocalFlix
 

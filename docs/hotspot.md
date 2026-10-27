@@ -6,7 +6,7 @@ A **hotspot** means your phone makes its own Wi-Fi. Other devices join it, like 
 
 You do not need to know about computers. Follow the steps in order. Take your time.
 
-> **Please read this honestly.** This should work on most phones, but it was not tested on every phone. Some phone brands block hotspot devices from seeing each other. If that happens, nothing connects, and there is no fix on that phone. See [If nothing connects](#if-nothing-connects).
+> **I want to be honest with you.** This should work on most phones, but I did not test it on every phone. Some phone brands block hotspot devices from seeing each other. If that happens, nothing connects, and there is no fix on that phone. See [If nothing connects](#if-nothing-connects).
 
 ## Read this first: what does NOT work with a hotspot
 
@@ -18,7 +18,7 @@ You do not need to know about computers. Follow the steps in order. Take your ti
 | Step 8, **Way B** (fixed address typed on the laptop) | The hotspot chooses its own numbers. A number you type may not fit, and then the laptop has no connection. It may also break your normal Wi-Fi later. | Do not use it with a hotspot. |
 | The QR page `/qr` when there is **no internet** | The page loads the QR picture from the internet. With no internet, the picture does not appear. | Type the address by hand. |
 | `http://localflix.local:8080` on Android phones and Android TVs | Android does not understand names that end in `.local`. | Use the numbers address. |
-| The TV auto-start helper (`tv_monitor.py`, [Start LocalFlix by itself](tv-autostart.md)) | It is built around one **home Wi-Fi name** and a TV address that stays the same. A hotspot changes both, and the helper was not made or tested for it. | Start LocalFlix by hand. |
+| The TV auto-start helper (`tv_monitor.py`, [Start LocalFlix by itself](tv-autostart.md)) | It is built around one **home Wi-Fi name** and a TV address that stays the same. A hotspot changes both, and I did not make or test the helper for it. | Start LocalFlix by hand. |
 | Being on **two Wi-Fi networks at the same time** | Most phones cannot join a Wi-Fi and share a hotspot at the same time. | Choose one. |
 | Seeing posters from the internet | Online poster lookup needs internet. | Add `--no-online` when you start LocalFlix. |
 | Setting the same fixed address "once and forever" | The hotspot may give different numbers each day. | Always check the address before you watch. |
@@ -115,7 +115,7 @@ This is the simplest setup if you have only one phone. First finish [the phone s
 
 ```
 termux-wake-lock
-cd ~/LocalFlix-main
+cd ~/LocalFlix-Server
 python localflix.py --movies "$HOME/storage/shared/Movies" --no-browser --no-online
 ```
 
@@ -139,7 +139,7 @@ Use this if the server phone should not be the hotspot (for example, the other p
 
 ```
 termux-wake-lock
-cd ~/LocalFlix-main
+cd ~/LocalFlix-Server
 python localflix.py --movies "$HOME/storage/shared/Movies" --no-browser --no-online
 ```
 
@@ -184,7 +184,7 @@ You can also try in Termux: `pkg install net-tools`, then `ifconfig`. Look for a
 
 ### TV app
 
-- If you use the LocalFlix TV app: it tries its saved address first, and then it looks for the server by itself. A hotspot changes the address, so the saved address often stops working. The automatic search **may** find the server, but this was not tested on a hotspot. If it does not, type the new address in the app and press **Connect**.
+- If you use the LocalFlix TV app: it tries its saved address first, and then it looks for the server by itself. A hotspot changes the address, so the saved address often stops working. The automatic search **may** find the server, but I have not tested this on a hotspot. If it does not, type the new address in the app and press **Connect**.
 - Making the TV app file needs a computer. See [Android TV app](tv-app.md). With no laptop, use the TV browser.
 
 ## Keep it working while you watch
@@ -222,7 +222,7 @@ If still nothing connects, your phone may **block devices from seeing each other
 | QR page | Works **only with internet** |
 | Name `localflix.local` | **Does not work** on Android. Only some iPhones and Macs. |
 | TV auto-start helper | **Does not work** |
-| TV app automatic search | Maybe (not tested) |
+| TV app automatic search | Maybe (I have not tested it) |
 | Online posters | Only with internet. Without internet, add `--no-online`. |
 
 ## What to read next

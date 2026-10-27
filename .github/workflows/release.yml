@@ -1,0 +1,62 @@
+# Makes a GitHub Release when I push a version tag, for example:
+#   git tag v2.1.0
+#   git push origin v2.1.0
+#
+# The Release gets one file: LocalFlix-Server.zip (only the server and the web page).
+# People who just want to run LocalFlix download that file, not the whole repo.
+# The TV app file (LocalFlix-TV.apk) is added to the same Release by hand, see docs/tv-app.md.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  server-zip:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check that the server code compiles
+        run: python -m compileall -q server
+
+      - name: Build LocalFlix-Server.zip
+        run: |
+          mkdir LocalFlix-Server
+          cp -r server/. LocalFlix-Server/
+          cp LICENSE LocalFlix-Server/
+          cat > LocalFlix-Server/README.txt <<'TXT'
+          LocalFlix server
+          ================
+          Start here: https://github.com/Huerte/LocalFlix/blob/main/docs/setup-guide.md
+
+          Quick start (Windows, Python 3.10 or newer):
+            py -m pip install -r requirements.txt
+            py localflix.py --movies "D:\Films"
+          TXT
+          find LocalFlix-Server -name "__pycache__" -type d -prune -exec rm -rf {} +
+          zip -r LocalFlix-Server.zip LocalFlix-Server
+
+      - name: Publish the Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: LocalFlix-Server.zip
+          generate_release_notes: true
+          body: |
+            ## Download
+
+            - **Server (Windows laptop or Android phone with Termux):** `LocalFlix-Server.zip` below. Then follow the [setup guide](https://github.com/Huerte/LocalFlix/blob/main/docs/setup-guide.md).
+            - **Android TV app:** `LocalFlix-TV.apk` below, if it is listed. Then follow the [TV app guide](https://github.com/Huerte/LocalFlix/blob/main/docs/tv-app.md).
+
+            See [CHANGELOG.md](https://github.com/Huerte/LocalFlix/blob/main/CHANGELOG.md) for what changed.

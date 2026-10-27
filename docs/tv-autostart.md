@@ -109,8 +109,8 @@ You can use the Task Scheduler window instead of the command.
    Tick **Delay task for 15 seconds**.
 5. **Actions**, New, Start a program:
    - Program: the full path of `pythonw.exe`. Find it with `py -c "import sys;print(sys.executable)"`, then change `python.exe` to `pythonw.exe`.
-   - Arguments: `"C:\path\to\LocalFlix-main\tv_monitor.py" --run`
-   - Start in: `C:\path\to\LocalFlix-main`
+   - Arguments: `"C:\path\to\LocalFlix-Server\tv_monitor.py" --run`
+   - Start in: `C:\path\to\LocalFlix-Server`
 6. **Conditions**: untick *Start the task only if the computer is on AC power* and *Stop if the computer switches to battery power*.
 7. **Settings**: untick *Stop the task if it runs longer than...*. For *If the task is already running*, choose **Do not start a new instance**.
 

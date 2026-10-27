@@ -5,6 +5,9 @@ Notable changes to LocalFlix. The format follows [Keep a Changelog](https://keep
 ## Unreleased
 
 ### Added
+- `.github/workflows/release.yml`: pushing a `v*` tag builds `LocalFlix-Server.zip` and publishes a GitHub Release
+- The TV app guide explains how to download `LocalFlix-TV.apk` from Releases, with building it yourself as the second way
+- "Making a release" section in CONTRIBUTING.md
 - `docs/phone-server.md`: a complete guide to run the LocalFlix server on an Android phone with Termux, with a list of the Windows steps and commands that do not work on a phone
 - `docs/hotspot.md`: a guide to use a phone hotspot instead of a router (laptop server, phone server, or two phones), with a list of what does not work
 - GNU GPL v3 license
@@ -12,6 +15,11 @@ Notable changes to LocalFlix. The format follows [Keep a Changelog](https://keep
 - Selecting the logo or the Home tab in the TV app rescans the library and refreshes the page
 
 ### Changed
+- The repo is now split into `server/` (everything needed to run LocalFlix) and `android-tv/` (the TV app). `docs/` and the project files stay at the top
+- The server is now downloaded from the Releases page as `LocalFlix-Server.zip`, so you no longer need the whole repo ZIP. The guides and the extracted folder name changed from `LocalFlix-main` to `LocalFlix-Server`
+- Open the `android-tv` folder in Android Studio (not the repo root). The built app file is now at `android-tv\app\build\outputs\apk\debug\app-debug.apk`
+- Guides and project files are written in my own words (first person) instead of "the author" and "we"
+- `.gitignore` paths now point to `server/` and `android-tv/`
 - README shortened, with the detailed guides moved to `docs/`
 - All guides rewritten in simple words for readers who are not technical and whose first language is not English
 - New `docs/setup-guide.md`: one complete step-by-step manual from installing Python to watching on a phone or TV. It replaces `docs/installation.md` and `docs/network.md`
@@ -22,6 +30,8 @@ Notable changes to LocalFlix. The format follows [Keep a Changelog](https://keep
 - Removed the Next button from the TV app player. The Next media key and the end-of-file prompt still work
 
 ### Fixed
+- The default movie folder was a fixed path from my own laptop (`C:\Users\hp\...`). It is now made from the home folder of whoever runs LocalFlix, and the default subtitle folder is empty, so it follows the movie folder
+- `fix_firewall.ps1` no longer uses a fixed Python path from my own laptop. It finds the real `python.exe` that `py` starts (or you give it with `-PythonPath`), stops with a clear message if it cannot find Python or is not run as administrator, and does not make a double rule when you run it twice
 - Guides no longer tell readers to run `gradlew assembleDebug`, because the project has no `gradlew` file. Use Android Studio's Build menu
 - Subtitle guide used the wrong menu name for the browser (it is Browse subtitle folder)
 - The search box in the TV app did not show the keyboard when OK was pressed and held

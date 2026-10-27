@@ -23,7 +23,7 @@ The fixes on this page are for a Windows laptop. Windows fixes (firewall, PowerS
 
 1. Check that you have internet. Run the same command again: `py -m pip install -r requirements.txt`
 2. A yellow message about a new version of `pip` is not a problem.
-3. Still red text? You may have a very new Python that some parts are not ready for. Install Python 3.13 from https://www.python.org/downloads/ (open the page of the Python 3.13 release and choose **Windows installer (64-bit)**), open a new PowerShell, and try again. Please also tell us in an issue which Python version you had.
+3. Still red text? You may have a very new Python that some parts are not ready for. Install Python 3.13 from https://www.python.org/downloads/ (open the page of the Python 3.13 release and choose **Windows installer (64-bit)**), open a new PowerShell, and try again. Please also tell me in an issue which Python version you had.
 
 ### `ffmpeg not found` in the start text
 

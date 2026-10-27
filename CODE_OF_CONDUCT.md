@@ -2,7 +2,7 @@
 
 This project is for people who want to watch their own movies on their own network and make that easier. Everyone is welcome, whatever their experience level.
 
-## What we expect
+## What I expect
 
 - Be respectful. Disagree with the idea, not the person.
 - Be patient with newcomers and with people whose first language is not English.
@@ -17,6 +17,6 @@ This project is for people who want to watch their own movies on their own netwo
 
 ## Enforcement
 
-The maintainer can edit or remove comments, issues and pull requests, and can block people who break these rules. To report a problem, contact the maintainer, [@Huerte](https://github.com/Huerte), through GitHub.
+I can edit or remove comments, issues and pull requests, and I can block people who break these rules. To report a problem, contact me, [@Huerte](https://github.com/Huerte), through GitHub.
 
 This applies in the repository and in any space where someone represents the project.

@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Only the latest release gets fixes.
+I only fix the latest release.
 
 ## What to know before you run it
 
@@ -15,6 +15,6 @@ LocalFlix has no login. Anyone who can reach the port can browse and play your l
 
 ## Reporting a vulnerability
 
-Please do not open a public issue. Use "Report a vulnerability" in the Security tab of the GitHub repository. If that is not available, contact [@Huerte](https://github.com/Huerte) on GitHub.
+Please do not open a public issue. Use "Report a vulnerability" in the Security tab of the GitHub repository. If that is not available, message me, [@Huerte](https://github.com/Huerte), on GitHub.
 
-Include what you found, how to reproduce it, and the version from the startup banner. Expect a first reply within a week.
+Include what you found, how to reproduce it, and the version from the startup banner. I will try to answer within a week.

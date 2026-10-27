@@ -86,5 +86,3 @@ Bug reports, ideas and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIB
 ## License
 
 LocalFlix is free software under the GNU General Public License v3.0. See [LICENSE](LICENSE).
-
-Copyright (C) 2026 Huerte

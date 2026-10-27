@@ -29,7 +29,7 @@ Guidelines:
 - Python 3.10 or newer, and no new required dependency without a good reason. Optional packages must fail quietly when missing.
 - Match the style of the file you edit.
 - Update the docs when behaviour changes, and add a line to [CHANGELOG.md](CHANGELOG.md).
-- In docs, keep the text plain and short.
+- In docs, write for readers who are **not technical** and whose first language is **not English**. Use short sentences and simple words. Use as few technical words as you can, and explain each one the first time. Give every step as a numbered action, say what the reader should see, and say what to do if it does not work.
 
 ## License
 

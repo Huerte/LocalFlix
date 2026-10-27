@@ -1,6 +1,6 @@
 # LocalFlix
 
-Stream your personal movie library to any phone, tablet or TV on your home Wi-Fi. No account, no subscription.
+Stream your personal movie library to any phone, tablet or TV on your Wi-Fi, from a Windows laptop or an Android phone. No account, no subscription.
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-3776AB.svg)](docs/setup-guide.md#step-1-install-python)
@@ -8,7 +8,7 @@ Stream your personal movie library to any phone, tablet or TV on your home Wi-Fi
 
 ## About
 
-LocalFlix is a small program for a Windows laptop. It reads one folder of movies and shows them as a web page. Any phone, tablet, TV or computer on the same Wi-Fi can open that page and play the movies. An Android TV app shows the same page and plays movies with a better player, so it opens more kinds of files than a TV browser. Nothing leaves your home network, and you do not need internet to watch.
+LocalFlix is a small program that reads one folder of movies and shows them as a web page. It runs on a Windows laptop. It can also run on an Android phone with the free Termux app, so you do not need a laptop (this works in theory but is not tested on every phone). Any phone, tablet, TV or computer on the same Wi-Fi can open that page and play the movies. The Wi-Fi can come from a home router or from a phone hotspot. An Android TV app shows the same page and plays movies with a better player, so it opens more kinds of files than a TV browser. Nothing leaves your own network, and you do not need internet to watch.
 
 - Home rows made from your folders, a Browse page with filters, and search
 - Posters made from your video files (needs ffmpeg), or from TMDB if you give it a key
@@ -16,6 +16,8 @@ LocalFlix is a small program for a Windows laptop. It reads one folder of movies
 - Continue where you stopped, and a question for the next file in the folder
 - Movies that a device cannot play are changed while they play (needs ffmpeg)
 - A TV app made for the remote control, with no mouse pointer
+- Runs on a Windows laptop, or on an Android phone with Termux
+- Works with a home router or with a phone hotspot (no internet needed to watch)
 
 ## New here? Start with the setup guide
 
@@ -41,6 +43,8 @@ LocalFlix prints a **Direct IP** address, for example `http://192.168.1.33:8080`
 | Put the LocalFlix app on an Android TV | [docs/tv-app.md](docs/tv-app.md) |
 | Add subtitles and fix the timing | [docs/subtitles.md](docs/subtitles.md) |
 | Start LocalFlix by itself when your TV is on | [docs/tv-autostart.md](docs/tv-autostart.md) |
+| Use an Android phone as the server, with no laptop (Termux) | [docs/phone-server.md](docs/phone-server.md) |
+| Use a phone hotspot instead of a router | [docs/hotspot.md](docs/hotspot.md) |
 | Fix a problem | [docs/troubleshooting.md](docs/troubleshooting.md) |
 
 ## Project layout

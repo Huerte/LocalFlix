@@ -5,6 +5,8 @@ Notable changes to LocalFlix. The format follows [Keep a Changelog](https://keep
 ## Unreleased
 
 ### Added
+- `docs/phone-server.md`: a complete guide to run the LocalFlix server on an Android phone with Termux, with a list of the Windows steps and commands that do not work on a phone
+- `docs/hotspot.md`: a guide to use a phone hotspot instead of a router (laptop server, phone server, or two phones), with a list of what does not work
 - GNU GPL v3 license
 - Contributing guide, code of conduct, security policy, and issue and pull request templates
 - Selecting the logo or the Home tab in the TV app rescans the library and refreshes the page

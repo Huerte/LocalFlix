@@ -7,6 +7,8 @@ With this guide, you do not need to type `py localflix.py` every day. A small he
 
 Away from home, nothing starts. Ever.
 
+> **This guide is only for a Windows 11 laptop on a home Wi-Fi.** It does not work on an Android phone, and it is not made for a phone hotspot. See [Use an Android phone as the server](phone-server.md) and [Use a phone hotspot](hotspot.md).
+
 The helper is called the **TV monitor**. It runs hidden in the background. You will not see a window.
 
 While the TV is using LocalFlix, the monitor also stops Windows from falling asleep on its own (see section 6).

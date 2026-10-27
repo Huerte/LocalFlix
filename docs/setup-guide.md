@@ -6,6 +6,10 @@ You do not need to know about computers. Follow the steps in order. Do one step 
 
 The first time, it takes about 30 to 60 minutes.
 
+> **No laptop?** Use an Android phone as the server. See [Use an Android phone as the server](phone-server.md).
+>
+> **No router?** Use a phone hotspot. See [Use a phone hotspot instead of a router](hotspot.md).
+
 ## Before you start
 
 ### How LocalFlix works
@@ -391,6 +395,8 @@ Your router can give the laptop a **new** address at any time. When this happens
 To stop this, make the laptop keep the **same** address all the time. Only the laptop needs this. Phones and TVs can change as they like.
 
 There are two ways. Do **one** of them.
+
+> **Using a phone hotspot instead of a router?** Skip this step. Both ways need a router or a normal Wi-Fi. They do not work with a hotspot. See [Use a phone hotspot](hotspot.md).
 
 | Way | Good | Not so good |
 |---|---|---|

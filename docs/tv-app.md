@@ -10,6 +10,8 @@ It takes about 45 to 90 minutes the first time. You do it once.
 
 ## Before you start
 
+> **No laptop?** Making the app file needs Android Studio, and Android Studio runs only on a computer. A phone cannot do it. Ask someone with a computer to make the app file once, or use the TV browser. The app then works with a phone server. See [Use an Android phone as the server](phone-server.md#step-11-open-localflix-on-a-tv).
+
 You need:
 
 - LocalFlix working on the laptop. Finish [the setup guide](setup-guide.md) up to Step 8 first.

@@ -4,6 +4,13 @@ Find the message or problem you see. Then follow the steps under it.
 
 **Open PowerShell in the LocalFlix folder** for the commands below. See [how to open it](setup-guide.md#b-open-powershell-in-the-localflix-folder).
 
+## Using an Android phone as the server, or a phone hotspot?
+
+The fixes on this page are for a Windows laptop. Windows fixes (firewall, PowerShell, `py`) do **not** work on a phone. Use these pages instead:
+
+- [Fixes for common problems on the phone](phone-server.md#fixes-for-common-problems-on-the-phone)
+- [If nothing connects with a hotspot](hotspot.md#if-nothing-connects)
+
 ## Problems while you install
 
 ### Windows says it does not know `py`

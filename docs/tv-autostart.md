@@ -135,7 +135,7 @@ Prefer to manage sleep yourself? Set `"keep_awake": false` in `tv_monitor.json`,
 |---|---|
 | `At home? no` while at home | Run `--setup` again. If you use a cable at home, the Wi-Fi name is empty; setup then relies on the router address, which still works |
 | TV `not found` but the TV is on | Is it on the same Wi-Fi (not a guest network)? Some routers block device-to-device traffic ("AP / client isolation"): turn that off |
-| Server starts but the TV cannot connect | The firewall step in the main README (`py localflix.py --firewall`) |
+| Server starts but the TV cannot connect | The firewall step in [network.md](network.md) (`py localflix.py --firewall`) |
 | Nothing happens, log says "No home network is set" | Run `py tv_monitor.py --setup` |
 | Task shows "Running" but the TV is off | It ends about a minute after the TV leaves the network. If it stays `Running`, run `py tv_monitor.py --check`: `TV ... FOUND` means the TV still answers on the network (many TVs do in standby). |
 | Task is `Ready` while home and TV are on | It checks once a minute, so wait up to a minute. You can also right-click the task > Run. If it never starts, run `py tv_monitor.py --check` and read `tv_monitor.log` |

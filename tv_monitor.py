@@ -4,7 +4,7 @@ LocalFlix TV monitor (Windows 11) - starts the LocalFlix server only when you ar
 
     py tv_monitor.py --setup     one-time questions: which Wi-Fi is "home" and which device is your TV
     py tv_monitor.py --check     show right now: at home? TV found? server running?
-    py tv_monitor.py --run       the background loop (Task Scheduler runs this, see TV_AUTOSTART_GUIDE.md)
+    py tv_monitor.py --run       the background loop (Task Scheduler runs this, see docs/tv-autostart.md)
 
 What it does
   * The monitor only stays alive while ALL THREE are true: you are on the home network,
@@ -532,7 +532,7 @@ def do_setup():
     save_config(cfg)
     print(f"\n  Saved to tv_monitor.json:  TV {cfg['tv_ip']} ({cfg['tv_mac'] or 'MAC unknown'}).")
     print("  Tip: reserve this address for the TV in your router so it never changes.")
-    print("  Next: run   py tv_monitor.py --check   and then install the Task Scheduler task (see TV_AUTOSTART_GUIDE.md).\n")
+    print("  Next: run   py tv_monitor.py --check   and then install the Task Scheduler task (see docs/tv-autostart.md).\n")
 
 
 def main():

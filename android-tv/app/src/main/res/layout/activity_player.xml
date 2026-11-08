@@ -25,7 +25,7 @@
     <!-- Subtitles when the stream is converted (transcode mode) -->
     <TextView
         android:id="@+id/subText"
-        android:layout_width="match_parent"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom|center_horizontal"
         android:layout_marginStart="96dp"
@@ -246,6 +246,13 @@
                     android:drawableStart="@drawable/ic_audio"
                     android:nextFocusUp="@id/seekBar"
                     android:text="Audio" />
+
+                <Button
+                    android:id="@+id/bAspect"
+                    style="@style/PlayerPill"
+                    android:drawableStart="@drawable/ic_aspect"
+                    android:nextFocusUp="@id/seekBar"
+                    android:text="Fit" />
 
                 <ImageButton
                     android:id="@+id/bSet"

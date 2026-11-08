@@ -11,8 +11,8 @@ android {
         applicationId "com.sarge.localflix"   // unchanged, so the app updates in place
         minSdk 21
         targetSdk 34
-        versionCode 3
-        versionName "2.1"
+        versionCode 4
+        versionName "2.2.0"
     }
 
     buildTypes {
@@ -33,6 +33,7 @@ android {
 
     buildFeatures {
         viewBinding true
+        buildConfig true
     }
 }
 

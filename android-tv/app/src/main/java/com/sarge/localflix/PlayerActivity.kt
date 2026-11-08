@@ -79,6 +79,7 @@ class PlayerActivity : FragmentActivity() {
     // ── playback state that must survive onStop/onStart ───────────────────────
     private var transcoding = false
     private var triedTranscode = false
+    private var copyVideoTranscode = false
     private var offsetMs = 0L              // movie time at which the current transcode stream starts (0 when direct)
     private var resumeMs = 0L              // movie time to start from
     private var wantPlay = true
@@ -141,12 +142,20 @@ class PlayerActivity : FragmentActivity() {
         hideSystemUi()
 
         resumeMs = (req.startSeconds * 1000).toLong()
+        // If Android killed the activity during a background session (process death), req.startSeconds
+        // is the original requested position, not where the user stopped. Read ResumeStore and prefer
+        // the stored position when it is meaningfully further ahead (>5 s) than the original request.
+        val stored = ResumeStore.load(this, req.id)
+        if (stored != null && stored > resumeMs / 1000.0 + 5.0) {
+            resumeMs = (stored * 1000).toLong()
+        }
         lastPosMs = resumeMs
         // Subtitles start OFF unless the user turned them on before (then the same track, or the first one).
         if (prefs.getBoolean(KEY_SUBS_ON, false) && subs.isNotEmpty()) {
             val want = prefs.getString(KEY_SUB_LABEL, "")
             subChoice = subs.indexOfFirst { it.label == want }.let { if (it >= 0) it else 0 }
         }
+        updateCcButton()
 
         speed = prefs.getFloat(KEY_SPEED, 1f)
         subSizePct = prefs.getInt(KEY_SUB_SIZE, 100)
@@ -154,7 +163,7 @@ class PlayerActivity : FragmentActivity() {
         subColor = prefs.getInt(KEY_SUB_COLOR, Color.WHITE)
         subBg = prefs.getString(KEY_SUB_BG, "outline") ?: "outline"
         fitMode = prefs.getString(KEY_FIT, "contain") ?: "contain"
-        b.playerView.resizeMode = if (fitMode == "cover") AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
+        setFit(fitMode)
         subOffsetMs = prefs.getLong(KEY_SUB_OFFSET + req.id, 0L)
 
         // Same title block as the web player: title, then "year · 1080p · MKV".
@@ -176,6 +185,7 @@ class PlayerActivity : FragmentActivity() {
         b.bFwd10.setOnClickListener { seekBy(10_000) }
         b.bSubs.setOnClickListener { openSubtitleMenu() }
         b.bAudio.setOnClickListener { openAudioMenu() }
+        b.bAspect.setOnClickListener { cycleAspect() }
         b.bSet.setOnClickListener { openSettingsMenu() }
         b.btnBack.setOnClickListener { finishWithResult(null) }
     }
@@ -281,7 +291,8 @@ class PlayerActivity : FragmentActivity() {
 
         if (transcode) {
             offsetMs = positionMs
-            val url = "${req.transcodeUrl}?start=${String.format(Locale.US, "%.2f", positionMs / 1000.0)}&audio=$audioIdx"
+            val copyParam = if (copyVideoTranscode) "&video_copy=1" else ""
+            val url = "${req.transcodeUrl}?start=${String.format(Locale.US, "%.2f", positionMs / 1000.0)}&audio=$audioIdx$copyParam"
             // Fragmented MP4 over HTTP: tell ExoPlayer the type, there is no file name to sniff.
             exo.setMediaItem(MediaItem.Builder().setUri(url).setMimeType(MimeTypes.VIDEO_MP4).build())
             loadCuesIfNeeded()
@@ -353,8 +364,9 @@ class PlayerActivity : FragmentActivity() {
     private fun canTranscode() = req.ffmpeg && !transcoding && !triedTranscode
 
     /** Direct mode could not play it (unsupported codec / container): convert on the server instead. */
-    private fun fallbackToTranscode() {
+    private fun fallbackToTranscode(copyVideo: Boolean = false) {
         triedTranscode = true
+        copyVideoTranscode = copyVideo
         showMsg("Converting for this TV...", 6000)
         startPlayback(logicalPos(), true)
     }
@@ -396,7 +408,7 @@ class PlayerActivity : FragmentActivity() {
         if (canTranscode()) { fallbackToTranscode(); return }
         val why = when {
             transcoding -> "Even the converted video could not be opened. The file may be damaged or use an unusual format."
-            !req.ffmpeg -> "This TV cannot play this file. Install ffmpeg on the laptop running LocalFlix (see the README) so it can be converted automatically."
+            !req.ffmpeg -> "This TV cannot play this file. Install ffmpeg on the server running LocalFlix (see the README) so it can be converted automatically."
             else -> "This TV cannot play this file."
         }
         val pos = logicalPos()
@@ -406,13 +418,19 @@ class PlayerActivity : FragmentActivity() {
 
     /** Looks for tracks the TV cannot decode (e.g. only an unsupported audio track) and applies the subtitle choice. */
     private fun onTracks(tracks: Tracks) {
+        // Toggle Audio button visibility depending on track count
+        val audioGroups = tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
+        b.bAudio.visibility = if (audioGroups.size <= 1) View.GONE else View.VISIBLE
+
         if (transcoding) return
         fun unsupported(type: Int): Boolean {
             val groups = tracks.groups.filter { it.type == type }
             return groups.isNotEmpty() && groups.none { g -> (0 until g.length).any { i -> g.isTrackSupported(i) } }
         }
-        if ((unsupported(C.TRACK_TYPE_VIDEO) || unsupported(C.TRACK_TYPE_AUDIO)) && canTranscode()) {
-            fallbackToTranscode()
+        val unVideo = unsupported(C.TRACK_TYPE_VIDEO)
+        val unAudio = unsupported(C.TRACK_TYPE_AUDIO)
+        if ((unVideo || unAudio) && canTranscode()) {
+            fallbackToTranscode(copyVideo = !unVideo && unAudio)
             return
         }
         if (appliedSub != subChoice) applySubtitle()
@@ -450,10 +468,15 @@ class PlayerActivity : FragmentActivity() {
 
     // ── lost connection: wait for the laptop, then continue from the same spot ─
 
-    /** True when the LocalFlix server on the laptop answers. The blocking call runs off the main thread. */
+    /** True when the LocalFlix server answers. Uses cheap /api/ping with fallback to /api/info. */
     private suspend fun serverAlive(): Boolean = withContext(Dispatchers.IO) {
         try {
-            JSONObject(Http.getText(serverBase() + "/api/info", 2500, 3000)).optString("name") == "LocalFlix"
+            val base = serverBase()
+            try {
+                JSONObject(Http.getText("$base/api/ping", 2000, 2500)).optString("name") == "LocalFlix"
+            } catch (e: Exception) {
+                JSONObject(Http.getText("$base/api/info", 2500, 3000)).optString("name") == "LocalFlix"
+            }
         } catch (e: Exception) {
             false
         }
@@ -477,6 +500,7 @@ class PlayerActivity : FragmentActivity() {
 
     private fun connectionLost() {
         if (reconnecting || isFinishing || isDestroyed) return
+        closeMenu()
         ui.removeCallbacks(stallCheck)
         captureState()              // remember the movie time and whether it was playing
         persistResume()
@@ -497,7 +521,7 @@ class PlayerActivity : FragmentActivity() {
      */
     private fun showWaiting() {
         ui.removeCallbacks(hideMsg)
-        b.msgText.text = "Reconnecting to your laptop..."
+        b.msgText.text = "Reconnecting to LocalFlix..."
         b.msgText.visibility = View.VISIBLE
         b.spinner.visibility = View.VISIBLE
     }
@@ -603,6 +627,11 @@ class PlayerActivity : FragmentActivity() {
         loadCuesIfNeeded()
         if (!transcoding) applySubtitle()
         b.subText.visibility = View.GONE
+        updateCcButton()
+    }
+
+    private fun updateCcButton() {
+        b.bSubs.text = if (subChoice >= 0) "CC ✓" else "CC"
     }
 
     /** Direct mode: turn the chosen side-loaded track on/off in ExoPlayer. */
@@ -952,6 +981,14 @@ class PlayerActivity : FragmentActivity() {
         }
         load("")
         showMenu(search)
+        // Bring up the on-screen keyboard on TVs where focusing an EditText does not automatically show it
+        search.postDelayed({
+            if (search.hasFocus() || search.requestFocus()) {
+                val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                imm.showSoftInput(search, InputMethodManager.SHOW_IMPLICIT)
+                search.postDelayed({ imm.showSoftInput(search, 0) }, 350)
+            }
+        }, 80)
     }
 
     private fun pickLibrarySubtitle(t: SubTrack) {
@@ -1006,15 +1043,38 @@ class PlayerActivity : FragmentActivity() {
             })
         }
         items.add(MenuEntry("Picture", false, header = true) {})
-        items.add(MenuEntry("Fit to screen", fitMode != "cover", keep = true) { setFit("contain"); openSettingsMenu("Fit to screen") })
-        items.add(MenuEntry("Fill screen (crop edges)", fitMode == "cover", keep = true) { setFit("cover"); openSettingsMenu("Fill screen (crop edges)") })
+        items.add(MenuEntry("Fit to screen", fitMode == "contain", keep = true) { setFit("contain"); openSettingsMenu("Fit to screen") })
+        items.add(MenuEntry("Fill screen (crop)", fitMode == "cover", keep = true) { setFit("cover"); openSettingsMenu("Fill screen (crop)") })
+        items.add(MenuEntry("Stretch to fill", fitMode == "fill", keep = true) { setFit("fill"); openSettingsMenu("Stretch to fill") })
         openMenu("Playback", items, b.bSet, focus ?: items.firstOrNull { !it.header && it.checked }?.label)
     }
 
     private fun setFit(mode: String) {
         fitMode = mode
         prefs.edit().putString(KEY_FIT, mode).apply()
-        b.playerView.resizeMode = if (mode == "cover") AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
+        b.playerView.resizeMode = when (mode) {
+            "cover" -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+            "fill"  -> AspectRatioFrameLayout.RESIZE_MODE_FILL
+            else    -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+        }
+        updateAspectButtonLabel()
+    }
+
+    private fun updateAspectButtonLabel() {
+        b.bAspect.text = when (fitMode) {
+            "cover" -> "Fill"
+            "fill"  -> "Stretch"
+            else    -> "Fit"
+        }
+    }
+
+    private fun cycleAspect() {
+        val next = when (fitMode) {
+            "contain" -> "cover"
+            "cover"   -> "fill"
+            else      -> "contain"
+        }
+        setFit(next)
     }
 
     private fun channelsText(ch: Int) = when { ch <= 0 -> ""; ch == 1 -> "Mono"; ch == 2 -> "Stereo"; ch == 6 -> "5.1"; ch == 8 -> "7.1"; else -> "$ch ch" }
@@ -1192,10 +1252,14 @@ class PlayerActivity : FragmentActivity() {
         val f = subSizePct / 100f
         val bgColor = if (subBg == "box") 0xB3000000.toInt() else Color.TRANSPARENT
         val edge = if (subBg == "outline") CaptionStyleCompat.EDGE_TYPE_OUTLINE else CaptionStyleCompat.EDGE_TYPE_NONE
+        val deltaY = -((subPosPct - 8) / 100f * resources.displayMetrics.heightPixels)
+        val ctrlOffset = if (controlsOn) -dp(120).toFloat() else 0f
+
         b.playerView.subtitleView?.apply {
             setStyle(CaptionStyleCompat(subColor, bgColor, Color.TRANSPARENT, edge, Color.BLACK, null))
             setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * 1.15f * f)
             setBottomPaddingFraction(subPosPct / 100f + if (controlsOn) 0.16f else 0f)
+            translationY = deltaY + ctrlOffset
         }
         // Converted-stream subtitles (drawn by us) follow the same look.
         b.subText.apply {
@@ -1203,12 +1267,14 @@ class PlayerActivity : FragmentActivity() {
             setTextColor(subColor)
             setShadowLayer(if (subBg == "outline") 6f else 0f, 0f, 0f, Color.BLACK)
             background = if (subBg == "box") android.graphics.drawable.GradientDrawable().apply { setColor(bgColor); cornerRadius = dp(6).toFloat() } else null
-            setPadding(dp(10), dp(2), dp(10), dp(2))
+            setPadding(dp(14), dp(4), dp(14), dp(4))
             (layoutParams as? android.widget.FrameLayout.LayoutParams)?.let {
+                it.width = android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
+                it.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
                 it.bottomMargin = resources.displayMetrics.heightPixels * subPosPct / 100
                 layoutParams = it
             }
-            translationY = if (controlsOn) -dp(120).toFloat() else 0f
+            translationY = ctrlOffset
         }
     }
 
@@ -1255,7 +1321,13 @@ class PlayerActivity : FragmentActivity() {
             if (e.action == KeyEvent.ACTION_UP) onBackKey()
             return true
         }
-        if (reconnecting) return true      // waiting for the laptop: nothing else to press (no controls, no player)
+        if (reconnecting) {
+            // Always let volume keys through to the system — the user must still be able to adjust TV volume.
+            if (k == KeyEvent.KEYCODE_VOLUME_UP || k == KeyEvent.KEYCODE_VOLUME_DOWN || k == KeyEvent.KEYCODE_VOLUME_MUTE) {
+                return super.dispatchKeyEvent(e)
+            }
+            return true      // waiting for the server: nothing else to press (no controls, no player)
+        }
 
         // Media keys work in every state.
         when (k) {

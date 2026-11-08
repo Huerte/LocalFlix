@@ -2,7 +2,27 @@
 
 Notable changes to LocalFlix. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## Unreleased
+## [2.2.0] - 2026-11-08
+
+### Added
+- TV player aspect ratio controls: cycle button on the player control bar (Fit, Fill, Stretch) and choices in the Playback settings menu
+- High-definition poster frames: video frame grabs now generate at 960px with high-quality JPEG encoding (`-q:v 2`), removing blurry poster cards
+- TV poster thumbnails upgraded to 540px width with `-q:v 2` compression for crisp rendering on 1080p and 4K screens
+- Safe poster placeholders: cards with pending or missing posters display movie titles on a clean dark card, avoiding blank cards or broken image icons
+- TV app connection screen now displays the installed version badge (`v2.2.0`)
+- Continuous integration workflow running syntax checks, unit tests, and Android debug builds
+
+### Changed
+- Removed online poster lookup completely: all external TMDb and iTunes lookups, API keys, and related settings are gone. Posters are sourced locally from folder sidecars, embedded container art, or video frames
+- Device-neutral language: replaced "laptop" and "computer" terms with "server device" across the web player, TV app, and server output
+
+### Fixed
+- Subtitle black background overflow: transcode and offset subtitles now wrap text tightly instead of stretching a black box across the full width of the screen
+- Subtitle vertical positioning: embedded subtitles in direct play mode now translate correctly when adjusting vertical position in the appearance menu
+- Web subtitle position persistence: dynamic CSS variables ensure custom subtitle positions stay in place when playback controls show or hide
+- Poster self-healing: poster status now verifies physical file existence on disk before reporting ready, automatically queueing generation for missing files
+
+## [2.1.0]
 
 ### Added
 - `.github/workflows/release.yml`: pushing a `v*` tag builds `LocalFlix-Server.zip` and publishes a GitHub Release
@@ -39,3 +59,6 @@ Notable changes to LocalFlix. The format follows [Keep a Changelog](https://keep
 ## 2.0.1
 
 Version in the code at the time this changelog was started. Earlier history is not listed.
+
+[2.2.0]: https://github.com/Huerte/LocalFlix/compare/v2.1.0...v2.2.0
+[2.1.0]: https://github.com/Huerte/LocalFlix/compare/v2.0.1...v2.1.0

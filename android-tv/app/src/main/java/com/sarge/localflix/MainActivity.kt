@@ -37,6 +37,8 @@ import androidx.lifecycle.lifecycleScope
 import com.sarge.localflix.databinding.ActivityMainBinding
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -69,7 +71,14 @@ class MainActivity : FragmentActivity() {
     // The native player returns the final position here; we hand it to the page (see LF.onNativePlayerClosed).
     private val playerLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
         playerOpen = false
-        val d = res.data ?: return@registerForActivityResult
+        webView?.onResume()
+        val d = res.data
+        if (d == null) {
+            // Activity was killed or closed without an intent bundle: sync stored progress from ResumeStore
+            webView?.evaluateJavascript("window.LF && LF.importNativeProgress && LF.importNativeProgress(${ResumeStore.toJson(this)})", null)
+            webView?.requestFocus()
+            return@registerForActivityResult
+        }
         val id = d.getStringExtra(PlayerActivity.RESULT_ID) ?: return@registerForActivityResult
         val secs = String.format(Locale.US, "%.1f", d.getDoubleExtra(PlayerActivity.RESULT_SECONDS, 0.0))
         val finished = d.getBooleanExtra(PlayerActivity.RESULT_FINISHED, false)
@@ -86,6 +95,7 @@ class MainActivity : FragmentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)   // keep the TV awake while the app is open
         b = ActivityMainBinding.inflate(layoutInflater)
         setContentView(b.root)
+        b.connVersion.text = "v${BuildConfig.VERSION_NAME}"
 
         b.connRetry.setOnClickListener { startFlow() }
         b.connConnect.setOnClickListener { connectManual() }
@@ -107,40 +117,68 @@ class MainActivity : FragmentActivity() {
     // ── connecting to the laptop ──────────────────────────────────────────────
 
     /**
-     * Saved address -> check it. If that fails (or nothing is saved) -> look for the laptop with a UDP broadcast.
-     * If that fails too -> let the user type the address. An address is only saved after /api/info answered.
+     * Runs the saved-URL check and UDP discovery simultaneously.
+     * Whichever responds first wins — no sequential timeout penalty when the saved IP is stale.
      */
     private fun startFlow() {
         startJob?.cancel()
         autoJob?.cancel()
         startJob = lifecycleScope.launch {
             val saved = savedUrl()
-            if (saved.isNotEmpty()) {
-                showConnect("Connecting to $saved ...", busy = true)
-                if (checkServer(saved)) { openWeb(saved); return@launch }
+            showConnect("Looking for LocalFlix ...", busy = true)
+
+            // Race: saved URL ping vs UDP broadcast. select{} picks the first non-null result.
+            var winnerUrl: String? = null
+            var winnerName: String? = null
+
+            val savedCheck = if (saved.isNotEmpty()) {
+                async(Dispatchers.IO) { if (checkServerQuick(saved)) saved else null }
+            } else null
+
+            val discoveryCheck = async(Dispatchers.IO) {
+                val found = Discovery.find(applicationContext)
+                if (found != null && checkServerQuick(found.url)) found else null
             }
-            showConnect("Looking for LocalFlix on your Wi-Fi ...", busy = true)
-            val found = Discovery.find(applicationContext)
-            if (found != null && checkServer(found.url)) {
-                saveUrl(found.url)
-                openWeb(found.url)
+
+            // Collect both; take whichever is non-null first. Since Discovery already has its own
+            // 2.5s internal deadline, and savedCheck has a 2s HTTP timeout, both finish close together.
+            // We prefer the saved URL (already known address) if it succeeds.
+            winnerUrl = savedCheck?.await()
+            if (winnerUrl == null) {
+                val found = discoveryCheck.await()
+                if (found != null) {
+                    winnerUrl = found.url
+                    winnerName = found.name.takeIf { it.isNotEmpty() }
+                }
+            } else {
+                discoveryCheck.cancel()
+            }
+
+            if (winnerUrl != null) {
+                saveUrl(winnerUrl)
+                val label = winnerName ?: Uri.parse(winnerUrl).host ?: winnerUrl
+                showConnect("Connected to $label", busy = true)
+                openWeb(winnerUrl)
                 return@launch
             }
+
             val msg = if (saved.isEmpty())
-                "Could not find LocalFlix automatically.\nIs LocalFlix running on your laptop, on the same Wi-Fi?\n\nType the address shown in the laptop window."
+                "Could not find LocalFlix on your Wi-Fi.\nMake sure LocalFlix is running on the same network.\n\nType the address shown in the LocalFlix window."
             else
-                "Cannot reach $saved.\nIs your laptop on and LocalFlix running?\n\nPress Retry, or type a new address."
+                "Cannot reach a LocalFlix server.\nIs LocalFlix running on the same Wi-Fi?\n\nPress Retry, or type a new address."
             showConnect(msg, busy = false, manual = true, prefill = saved)
             startAutoRetry()
         }
     }
 
-    /** Finds the laptop without touching the screen: saved address first, then a UDP broadcast. Returns its URL or null. */
-    private suspend fun quietFind(): String? {
+    /** Finds the server without touching the screen: saved address and UDP discovery run concurrently. */
+    private suspend fun quietFind(): String? = coroutineScope {
         val saved = savedUrl()
-        if (saved.isNotEmpty() && checkServer(saved)) return saved
+        val savedCheck = if (saved.isNotEmpty()) async(Dispatchers.IO) {
+            if (checkServerQuick(saved)) saved else null
+        } else null
         val found = Discovery.find(applicationContext)
-        return if (found != null && checkServer(found.url)) found.url else null
+        savedCheck?.await() ?: if (found != null && checkServerQuick(found.url)) found.url else null
     }
 
     /**
@@ -196,7 +234,7 @@ class MainActivity : FragmentActivity() {
         }
     }
 
-    /** Preflight: GET /api/info. Much faster and friendlier than waiting for a WebView timeout. */
+    /** Preflight: GET /api/info. Used for manual address entry where we want a clear error on wrong URL. */
     private suspend fun checkServer(url: String): Boolean = withContext(Dispatchers.IO) {
         try {
             JSONObject(Http.getText("$url/api/info", 3500, 4000)).optString("name") == "LocalFlix"
@@ -205,11 +243,30 @@ class MainActivity : FragmentActivity() {
         }
     }
 
+    /**
+     * Lightweight liveness check using /api/ping (no library scan).
+     * Used for the parallel connection flow where both saved-URL and discovery race each other.
+     * Falls back to /api/info if the server is older and doesn't have /api/ping yet.
+     */
+    private suspend fun checkServerQuick(url: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val text = Http.getText("$url/api/ping", 2000, 2500)
+            JSONObject(text).optString("name") == "LocalFlix"
+        } catch (e: Exception) {
+            // Older server without /api/ping — fall back to /api/info
+            try {
+                JSONObject(Http.getText("$url/api/info", 2000, 2500)).optString("name") == "LocalFlix"
+            } catch (e2: Exception) {
+                false
+            }
+        }
+    }
+
     /** Menu key, or the web Settings > "Change TV server..." button. */
     private fun showChangeServer() {
         startJob?.cancel()
         autoJob?.cancel()
-        showConnect("Enter the address shown in the LocalFlix window on your laptop.", busy = false, manual = true, prefill = savedUrl())
+        showConnect("Enter the address shown in the LocalFlix window.", busy = false, manual = true, prefill = savedUrl())
     }
 
     private fun showConnect(status: String, busy: Boolean, manual: Boolean = false, prefill: String = "") {
@@ -292,12 +349,12 @@ class MainActivity : FragmentActivity() {
 
             // Never show Android's raw error page: show our friendly screen instead.
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: android.webkit.WebResourceError) {
-                if (request.isForMainFrame) pageError("Cannot load the LocalFlix page.\nIs your laptop on and LocalFlix running?")
+                if (request.isForMainFrame) pageError("Cannot load the LocalFlix page.\nMake sure LocalFlix is running on the network.")
             }
 
             override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
                 if (request.isForMainFrame && errorResponse.statusCode >= 400) {
-                    pageError("LocalFlix on your laptop ran into a problem.\nPlease try again in a moment.")
+                    pageError("LocalFlix server ran into a problem.\nPlease try again in a moment.")
                 }
             }
 
@@ -455,8 +512,17 @@ class MainActivity : FragmentActivity() {
 
     private fun launchPlayer(json: String) {
         if (playerOpen) return
-        try { PlayRequest.parse(json) } catch (e: Exception) { return }   // refuse broken requests early
+        val req = try { PlayRequest.parse(json) } catch (e: Exception) { return }   // refuse broken requests early
+        // Security check: validate that streamUrl matches the current serverUrl host
+        try {
+            val reqUri = Uri.parse(req.streamUrl)
+            val serverUri = Uri.parse(serverUrl)
+            if (reqUri.host != serverUri.host) return
+        } catch (e: Exception) {
+            return
+        }
         playerOpen = true
+        webView?.onPause()
         playerLauncher.launch(Intent(this, PlayerActivity::class.java).putExtra(PlayerActivity.EXTRA_REQUEST, json))
     }
 

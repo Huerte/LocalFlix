@@ -19,6 +19,17 @@ object ResumeStore {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(id, v).apply()
     }
 
+    /**
+     * Returns the stored position in seconds for [id], or null if no record exists.
+     * Used by PlayerActivity.onCreate to restore position after process death.
+     */
+    fun load(ctx: Context, id: String): Double? {
+        val raw = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(id, null) ?: return null
+        val p = raw.split('|')
+        if (p.size < 4) return null
+        return try { p[0].toDouble() } catch (e: NumberFormatException) { null }
+    }
+
     /** {"<id>": {"t":secs,"d":dur,"ts":millis,"w":true|false}, ...} */
     fun toJson(ctx: Context): String {
         val out = JSONObject()

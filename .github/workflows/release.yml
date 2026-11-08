@@ -1,6 +1,6 @@
 # Makes a GitHub Release when I push a version tag, for example:
-#   git tag v2.1.0
-#   git push origin v2.1.0
+#   git tag v2.2.0
+#   git push origin v2.2.0
 #
 # The Release gets one file: LocalFlix-Server.zip (only the server and the web page).
 # People who just want to run LocalFlix download that file, not the whole repo.
@@ -27,6 +27,15 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Verify git tag matches VERSION
+        run: |
+          TAG="${{ github.ref_name }}"
+          VER=$(python -c "import sys; sys.path.insert(0, 'server'); from lf.core import VERSION; print(VERSION)")
+          if [ "$TAG" != "v$VER" ]; then
+            echo "Error: Git tag $TAG does not match lf.core VERSION v$VER"
+            exit 1
+          fi
 
       - name: Check that the server code compiles
         run: python -m compileall -q server

@@ -9,7 +9,7 @@ import threading
 import time
 import unicodedata
 
-VERSION = "2.0.1"
+VERSION = "2.2.0"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 VIDEO_EXTS = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".mpg", ".mpeg", ".ts", ".3gp", ".ogv"}
@@ -32,8 +32,6 @@ class Config:
         "movies_dir": default_movies_dir(),
         "subtitle_dir": "",   # empty = use the "subtitle" folder inside the movie folder, if there is one
         "port": 8080,
-        "online_lookup": True,
-        "tmdb_key": "",
     }
 
     def __init__(self):
@@ -43,7 +41,6 @@ class Config:
         self.allow_remote_admin = False
         self.open_browser = True
         self.data_dir = os.environ.get("LOCALFLIX_DATA") or os.path.join(ROOT, "localflix_data")
-        self.itunes_url = os.environ.get("LOCALFLIX_ITUNES_URL", "https://itunes.apple.com/search")
 
     def load(self):
         try:
@@ -356,6 +353,13 @@ def mid_for(rel: str) -> str:
     return hashlib.sha1(rel.lower().encode("utf-8", "replace")).hexdigest()[:12]
 
 
+def stable_key(title: str, year: int | None, size: int) -> str:
+    """Content-stable movie key (title, year, size bucket) that survives file renames."""
+    size_mb = size // (1024 * 1024)
+    raw = f"{title.lower().strip()}|{year or 0}|{size_mb}"
+    return hashlib.sha1(raw.encode("utf-8", "replace")).hexdigest()[:12]
+
+
 def added_time(st) -> int:
     t = getattr(st, "st_birthtime", None)
     if t is None:
@@ -399,7 +403,8 @@ class Library:
                         folder = "" if folder == "." else folder
                         title, year = parse_name(stem)
                         movies.append({
-                            "id": mid_for(rel), "name": stem, "title": title, "year": year, "path": rel,
+                            "id": mid_for(rel), "stable_id": stable_key(title, year, st.st_size),
+                            "name": stem, "title": title, "year": year, "path": rel,
                             "full": full, "ext": ext[1:].upper(), "size": st.st_size, "size_str": human_size(st.st_size),
                             "folder": folder, "added": added_time(st), "mtime": int(st.st_mtime),
                         })
@@ -603,7 +608,11 @@ class SubtitleIndex:
                     out.append(e)
                 continue
             if e["kind"] == "sidecar" and os.path.dirname(e["full"]) == os.path.dirname(movie["full"]):
-                if os.path.splitext(e["name"])[0].lower().startswith(movie["name"].lower()):
+                sub_stem = os.path.splitext(e["name"])[0].lower()
+                movie_stem = movie["name"].lower()
+                # Exact stem match, or stem followed by a language code like ".en", "_en", or " en"
+                # Prevents "Alien 2.srt" from falsely attaching to "Alien.mkv"
+                if sub_stem == movie_stem or re.match(r"^" + re.escape(movie_stem) + r"[\.\-_ ][a-z]{2,3}$", sub_stem):
                     out.append(e)
                     continue
             for sk, sy in e["keys"]:

@@ -33,10 +33,8 @@ def parse_args():
     p.add_argument("--movies", help="folder that contains your movies")
     p.add_argument("--subtitles", help="folder that contains subtitle files (.srt, .vtt, .ass ...)")
     p.add_argument("--port", type=int, help="port to listen on (default 8080)")
-    p.add_argument("--tmdb-key", help="optional free TMDB API key for better posters")
-    p.add_argument("--no-online", action="store_true", help="never contact the internet (no poster lookup)")
     p.add_argument("--no-browser", action="store_true", help="do not open the browser automatically")
-    p.add_argument("--local-only", action="store_true", help="only accept connections from this computer")
+    p.add_argument("--local-only", action="store_true", help="only accept connections from this device")
     p.add_argument("--remote-admin", action="store_true", help="let other devices change folder settings")
     p.add_argument("--firewall", action="store_true", help="Windows: allow the port through the firewall, then exit")
     return p.parse_args()
@@ -90,10 +88,6 @@ def main():
         cfg.set("subtitle_dir", os.path.expanduser(args.subtitles), persist=False)
     if args.port:
         cfg.set("port", args.port, persist=False)
-    if args.tmdb_key:
-        cfg.set("tmdb_key", args.tmdb_key, persist=False)
-    if args.no_online:
-        cfg.set("online_lookup", False, persist=False)
     if args.local_only:
         cfg.host = "127.0.0.1"
     cfg.allow_remote_admin = args.remote_admin
@@ -120,7 +114,7 @@ def main():
     print(f"   Subtitles  : {sd[0] if sd else 'none set'}  ({len(app.services['subs'].entries)} files)")
     print(f"   ffmpeg     : {'found' if app.services['media'].available else 'not found (optional, see README)'}")
     print(f"  {line}")
-    print(f"   This computer   ->  http://localhost:{port}")
+    print(f"   This device     ->  http://localhost:{port}")
     if cfg.host != "127.0.0.1":
         _mdns = start_mdns(port)
         if _mdns:
@@ -128,7 +122,7 @@ def main():
         for i, ip in enumerate(lan_addresses()):
             label = "   Direct IP       ->" if i == 0 else "   Other network   ->"
             print(f"{label}  http://{ip}:{port}")
-        print(f"\n   Android / TV: scan the QR at  http://localhost:{port}/qr  (or reserve the laptop's IP in your router)")
+        print(f"\n   Android / TV: scan the QR at  http://localhost:{port}/qr  (or reserve the server IP in your router)")
         print("\n   Phone or TV cannot connect?  Run once as Administrator:")
         print("       py localflix.py --firewall  then  .\\fix_firewall.ps1")
         start_discovery(port)

@@ -86,7 +86,7 @@ class Media:
             at = min(max(duration * 0.12, 1.0), 300.0)
         for t in (at, 1.0):
             r = self.run([self.ffmpeg, "-y", "-v", "error", "-ss", f"{t:.2f}", "-i", path, "-frames:v", "1",
-                          "-vf", "scale=480:-2", "-q:v", "4", out], 60)
+                          "-vf", "scale=960:-2", "-q:v", "2", out], 60)
             if r.returncode == 0 and os.path.isfile(out) and os.path.getsize(out) > 500:
                 return True
         return False
@@ -97,11 +97,16 @@ class Media:
         r = self.run([self.ffmpeg, "-v", "error", "-i", path, "-map", f"0:s:{n}", "-f", "srt", "-"], 120)
         return r.stdout if r.returncode == 0 and r.stdout else None
 
-    def transcode_cmd(self, path, start=0.0, audio=0):
+    def transcode_cmd(self, path, start=0.0, audio=0, copy_video=False):
         cmd = [self.ffmpeg, "-v", "error"]
         if start > 0:
             cmd += ["-ss", f"{start:.2f}"]
-        cmd += ["-i", path, "-map", "0:v:0", "-map", f"0:a:{audio}?", "-c:v", "libx264", "-preset", "veryfast",
-                "-crf", "23", "-vf", "scale='min(1920,iw)':-2,format=yuv420p", "-c:a", "aac", "-b:a", "160k", "-ac", "2",
+        cmd += ["-i", path, "-map", "0:v:0", "-map", f"0:a:{audio}?"]
+        if copy_video:
+            cmd += ["-c:v", "copy"]
+        else:
+            cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+                    "-vf", "scale='min(1920,iw)':-2,format=yuv420p"]
+        cmd += ["-c:a", "aac", "-b:a", "160k", "-ac", "2",
                 "-sn", "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "-"]
         return cmd

@@ -379,7 +379,7 @@ class KeepAwake:
             flags = self.ES_CONTINUOUS | (self.ES_SYSTEM_REQUIRED if want else 0)
             ctypes.windll.kernel32.SetThreadExecutionState(flags)
         self.on = want
-        log.info("Keeping Windows awake: %s", "ON (TV is using the server)" if want else "OFF (laptop may sleep again)")
+        log.info("Keeping Windows awake: %s", "ON (TV is using the server)" if want else "OFF (server device may sleep again)")
 
 
 # ───────────────────────── the background loop ─────────────────────────
@@ -487,7 +487,7 @@ def do_setup():
         print("  This tool is for Windows.")
         return
     cfg = load_config()
-    print("\n  LocalFlix TV monitor - one-time setup\n  Make sure this laptop is on your HOME Wi-Fi and the TV is switched on.\n")
+    print("\n  LocalFlix TV monitor - one-time setup\n  Make sure the server device is on your HOME Wi-Fi and the TV is switched on.\n")
     ssids = current_ssids()
     gmac = gateway_mac()
     if ssids:

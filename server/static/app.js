@@ -13,7 +13,7 @@
   // Every request failure is turned into a message a non-technical person understands.
   //   err.offline = true  -> the laptop could not be reached at all (turned off, LocalFlix closed, Wi-Fi gone)
   //   err.friendly = true -> err.message is safe to show as it is
-  LF.OFFLINE_MSG = "We can't reach your laptop right now. Please make sure it is turned on and LocalFlix is running, then try again.";
+  LF.OFFLINE_MSG = "We can't reach the server right now. Please make sure the server device is turned on and LocalFlix is running, then try again.";
   LF.API_TIMEOUT = 7000;
   LF.api = async function (path, opts) {
     opts = opts || {};
@@ -50,14 +50,20 @@
   LF.progress = {
     _all() { return store.get('lf.progress', {}) || {}; },
     get(id) { return this._all()[id]; },
-    set(id, t, dur) { const a = this._all(); a[id] = { t, d: dur, ts: Date.now() }; store.set('lf.progress', a); },
+    set(id, t, dur) {
+      const a = this._all(); a[id] = { t, d: dur, ts: Date.now() }; store.set('lf.progress', a);
+      LF.syncProgressToServer(id, t, dur, false);
+    },
     // The movie played most recently (any state), or null.
     last() {
       const a = this._all(); let best = null;
       for (const id in a) if (a[id] && a[id].ts && (!best || a[id].ts > a[best].ts)) best = id;
       return best;
     },
-    markWatched(id) { const a = this._all(); if (a[id]) { a[id].watched = true; a[id].t = null; a[id].ts = Date.now(); } else { a[id] = { watched: true, ts: Date.now() }; } store.set('lf.progress', a); },
+    markWatched(id) {
+      const a = this._all(); if (a[id]) { a[id].watched = true; a[id].t = null; a[id].ts = Date.now(); } else { a[id] = { watched: true, ts: Date.now() }; } store.set('lf.progress', a);
+      LF.syncProgressToServer(id, 0, (a[id] && a[id].d) || 0, true);
+    },
     // Movies that can be continued, most recently watched first.
     resumable() {
       const a = this._all();
@@ -65,6 +71,35 @@
         .sort((x, y) => (a[y].ts || 0) - (a[x].ts || 0));
     },
   };
+
+  LF.syncProgressToServer = function (id, t, dur, watched) {
+    try {
+      fetch('/api/progress', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, seconds: t || 0, duration: dur || 0, watched: !!watched, updatedAt: Date.now() }),
+      }).catch(() => {});
+    } catch {}
+  };
+
+  LF.fetchServerProgress = async function () {
+    try {
+      const res = await fetch('/api/progress');
+      if (!res.ok) return;
+      const list = await res.json();
+      if (!Array.isArray(list)) return;
+      const a = LF.progress._all(); let changed = false;
+      list.forEach((item) => {
+        if (!item || !item.id || !item.ts) return;
+        const cur = a[item.id];
+        if (cur && (cur.ts || 0) >= item.ts) return;
+        a[item.id] = item.w ? { watched: true, t: null, d: item.d, ts: item.ts } : { t: item.t, d: item.d, ts: item.ts };
+        changed = true;
+      });
+      if (changed) store.set('lf.progress', a);
+    } catch {}
+  };
+
   // TV app: positions saved by the native player (it writes them every few seconds, even when the page never hears
   // about the player closing, and they survive a changed server address). Keep whichever record is newer.
   LF.importNativeProgress = function (all) {
@@ -73,6 +108,7 @@
       const n = all[id], cur = a[id];
       if (!n || !n.ts || (cur && (cur.ts || 0) >= n.ts)) return;
       a[id] = n.w ? { watched: true, t: null, ts: n.ts } : { t: n.t, d: n.d, ts: n.ts };
+      LF.syncProgressToServer(id, n.t, n.d, n.w);
       changed = true;
     });
     if (changed) store.set('lf.progress', a);
@@ -119,11 +155,11 @@
   //   while the laptop is off): a short toast is shown and the quiet reconnect loop below does the rest.
   LF.notice = function (o) {
     o = o || {};
-    if (o.offline) { LF.noteOffline(); LF.toast('Your laptop is not reachable. Reconnecting in the background...'); return null; }
+    if (o.offline) { LF.noteOffline(); LF.toast('Server is not reachable. Reconnecting in the background...'); return null; }
     if (modalEl && modalEl._notice) return modalEl._noticeKey === o.title ? modalEl : null;   // never stack or repeat notices
     const html = `<div class="modal sm"><div class="m-body"><div class="state" style="margin:0;padding:8px 0 0">
         <svg class="ic"><use href="#i-alert"/></svg>
-        <h2 style="padding:0">${esc(o.title || 'Cannot reach your laptop')}</h2>
+        <h2 style="padding:0">${esc(o.title || 'Cannot reach the server')}</h2>
         <p>${esc(o.text || LF.OFFLINE_MSG)}</p>
         <div class="actions" style="justify-content:center;margin-top:8px">
           ${o.retry ? '<button class="btn primary" type="button" id="nRetry">Try again</button>' : ''}
@@ -238,12 +274,13 @@
 
   /* ---- poster image ---- */
   // The TV app asks the server for a small copy (?w=): decoding full-size covers is what makes a TV stutter.
-  const posterUrl = LF.posterUrl = (m, w) => `/poster/${m.id}?v=${m.pv}${LF.app ? '&w=' + (w || 360) : ''}`;
+  const posterUrl = LF.posterUrl = (m, w) => `/poster/${m.id}?v=${m.pv}${LF.app ? '&w=' + (w || 540) : ''}`;
   function posterEl(m, cls) {
     const prog = LF.progress.get(m.id);
     const pct = prog && prog.d ? Math.round(prog.t / prog.d * 100) : 0;
     const watched = prog && prog.watched;
-    return `<div class="poster ${cls || ''}" data-id="${m.id}"><div class="ph ${m.poster !== 'ready' ? 'shim' : ''}">${m.poster === 'ready' ? `<img data-p="1" alt="" decoding="async" src="${posterUrl(m)}" loading="lazy">` : ''}</div>${m.subs ? '<div class="badges"><span class="badge cc">CC</span></div>' : ''}</div>${pct > 3 && !watched ? `<div class="prog"><i style="width:${pct}%"></i></div>` : ''}`;
+    const ready = m.poster === 'ready';
+    return `<div class="poster ${cls || ''}" data-id="${m.id}"><div class="ph ${ready ? '' : 'shim'}"><span class="ph-t">${esc(m.title)}</span></div>${ready ? `<img data-p="1" alt="" decoding="async" src="${posterUrl(m)}" loading="lazy" onload="this.classList.add('ld')" onerror="this.classList.add('err')">` : ''}${m.subs ? '<div class="badges"><span class="badge cc">CC</span></div>' : ''}${pct > 3 && !watched ? `<div class="prog"><i style="width:${pct}%"></i></div>` : ''}</div>`;
   }
   // IntersectionObserver-based image lazy loader for smooth card rendering
   let _imgObs = null;
@@ -274,11 +311,19 @@
 
   /* ---- card ---- */
   function card(m) {
+    const meta = posters.infoCache ? posters.infoCache[m.id] : {};
+    const genre = m.genre || (meta && meta.genre) || '';
     return `<a class="card" href="#/movie/${m.id}" data-id="${m.id}" aria-label="${esc(m.title)}${m.year ? ' (' + m.year + ')' : ''}" role="article">
       ${posterEl(m)}
       <div class="card-overlay"><div class="card-overlay-play"><svg class="ic"><use href="#i-play"/></svg></div></div>
-      <div class="c-t">${esc(m.title)}</div>
-      <div class="c-m">${[m.year, m.ext].filter(Boolean).join(' · ')}</div>
+      <div class="c-info">
+        <div class="c-t">${esc(m.title)}</div>
+        <div class="c-m">
+          ${m.year ? `<span class="c-yr">${m.year}</span>` : ''}
+          ${genre ? `<span class="c-gn">${esc(genre)}</span>` : ''}
+          ${m.ext ? `<span class="c-ext">${m.ext}</span>` : ''}
+        </div>
+      </div>
     </a>`;
   }
 
@@ -612,12 +657,15 @@
         <div class="m-body">
           <h2>Settings</h2>
           ${LF.app ? '<div class="actions" style="margin:0 0 16px"><button class="btn" type="button" id="sChange">Change TV server...</button></div>' : ''}
-          ${!s.can_edit ? '<div class="msg">Settings can only be changed from the computer running LocalFlix.</div>' : ''}
+          ${!s.can_edit ? '<div class="msg">Settings can only be changed from the server device running LocalFlix.</div>' : ''}
           <div id="sMsg"></div>
           <form id="sForm">
             <div class="form-row"><label for="sMovies">Movies folder</label><input class="inp" id="sMovies" type="text" value="${esc(s.movies_dir)}" placeholder="C:\\Users\\You\\Videos\\Movies" ${!s.can_edit ? 'readonly' : ''}><small>Folder that contains your video files.</small></div>
             <div class="form-row"><label for="sSubs">Subtitle folder</label><input class="inp" id="sSubs" type="text" value="${esc(s.subtitle_dir)}" placeholder="C:\\Users\\You\\Videos\\Movies\\subtitle" ${!s.can_edit ? 'readonly' : ''}><small>Folder that contains .srt / .ass / .vtt files. Auto-detected when placed in a "subtitle" subfolder inside your movies folder.</small></div>
-            ${s.can_edit ? '<div class="actions" style="margin-top:20px"><button class="btn primary" type="submit" id="sSave">Save &amp; Rescan</button></div>' : ''}
+            ${s.can_edit ? `<div class="actions" style="margin-top:20px;display:flex;gap:12px;flex-wrap:wrap">
+              <button class="btn primary" type="submit" id="sSave">Save &amp; Rescan</button>
+              <button class="btn" type="button" id="sRefreshPosters">Regenerate Posters</button>
+            </div>` : ''}
           </form>
         </div>
       </div>`;
@@ -630,8 +678,12 @@
         const msg = $('#sMsg', modal.el);
         const btn = $('#sSave', modal.el); if (btn) btn.textContent = 'Saving…';
         try {
+          const payload = {
+            movies_dir: $('#sMovies', modal.el).value.trim(),
+            subtitle_dir: $('#sSubs', modal.el).value.trim(),
+          };
           await LF.api('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ movies_dir: $('#sMovies', modal.el).value.trim(), subtitle_dir: $('#sSubs', modal.el).value.trim() }) });
+            body: JSON.stringify(payload) });
           msg.innerHTML = '<div class="msg ok">Saved. Rescanning library...</div>';
           await LF.load(); if (btn) btn.textContent = 'Save & Rescan';
         } catch (err) {
@@ -639,6 +691,19 @@
           if (btn) btn.textContent = 'Save & Rescan';
         }
       };
+      const rBtn = $('#sRefreshPosters', modal.el);
+      if (rBtn) {
+        rBtn.onclick = async () => {
+          const msg = $('#sMsg', modal.el);
+          rBtn.textContent = 'Queuing…'; rBtn.disabled = true;
+          try {
+            const r = await LF.api('/api/refresh-posters', { method: 'POST' });
+            msg.innerHTML = `<div class="msg ok">Regenerating ${r.queued || 'all'} poster${r.queued !== 1 ? 's' : ''} from video clips in the background. Cards will update automatically.</div>`;
+          } catch {
+            msg.innerHTML = '<div class="msg err">Could not start poster refresh.</div>';
+          } finally { rBtn.textContent = 'Regenerate Posters'; rBtn.disabled = false; }
+        };
+      }
     }, (err) => {
       // The laptop did not answer: say so in plain words instead of silently doing nothing.
       if (err && err.offline) { LF.notice({ offline: true }); location.replace('#' + (LF.pageHash || '/')); return; }
@@ -1152,8 +1217,15 @@
       if (old.get(m.id) === m.pv) return;
       document.querySelectorAll(`.poster[data-id="${m.id}"]`).forEach((p) => {
         const img = p.querySelector('img[data-p]'); if (img) img.remove();
-        const ph = p.querySelector('.ph'); if (ph) { ph.classList.remove('shim'); if (m.poster === 'ready') ph.innerHTML = ''; }
-        if (m.poster === 'ready') { const ni = document.createElement('img'); ni.dataset.p = '1'; ni.alt = ''; ni.decoding = 'async'; ni.src = posterUrl(m); ni.addEventListener('load', () => ni.classList.add('ld')); p.insertBefore(ni, p.firstChild); }
+        const ph = p.querySelector('.ph'); if (ph) ph.classList.remove('shim');
+        if (m.poster === 'ready') {
+          const ni = document.createElement('img');
+          ni.dataset.p = '1'; ni.alt = ''; ni.decoding = 'async'; ni.loading = 'lazy';
+          ni.onload = () => ni.classList.add('ld');
+          ni.onerror = () => ni.classList.add('err');
+          ni.src = posterUrl(m);
+          p.appendChild(ni);
+        }
       });
     });
   };
@@ -1211,6 +1283,7 @@
     setupSearch();
     if (LF.app) setupTv();
     if (LF.app) { try { LF.importNativeProgress(JSON.parse(window.LocalFlixTV.getResume())); } catch { /* older app build: no bridge method */ } }
+    await LF.fetchServerProgress();
     $('#main').innerHTML = '<div class="page"><div class="grid" style="margin-top:40px">' + '<div class="skel"></div>'.repeat(20) + '</div></div>';
     window.addEventListener('hashchange', () => { LF.routed = true; route(); });
     const ok = await LF.load(false);

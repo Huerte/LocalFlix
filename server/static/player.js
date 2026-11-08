@@ -134,8 +134,8 @@
   const nativeDur = {};
   async function openNative(movie, opts) {
     let det = null;
-    // The details request doubles as the "is the laptop there?" check before the TV player opens.
-    const slow = setTimeout(() => LF.toast('Connecting to your laptop...'), 1500);
+    // The details request doubles as the "is the server there?" check before the TV player opens.
+    const slow = setTimeout(() => LF.toast('Connecting to server...'), 1500);
     try { det = await LF.api('/api/movies/' + movie.id); }
     catch (err) {
       det = null;
@@ -285,7 +285,7 @@
     if (mode === 'direct' && LF.info && LF.info.ffmpeg && !fellBack) { fallback('This format is not supported by this device'); return; }
     E.pSpin.hidden = true;
     const ff = LF.info && LF.info.ffmpeg;
-    E.pErr.innerHTML = `<h2>This video cannot be played</h2><p>${ff ? 'Even compatibility mode could not open the file. It may be damaged or use an unusual format.' : 'This device cannot decode this file. Install ffmpeg on the computer running LocalFlix to enable automatic conversion, or convert the file to MP4.'}</p><div class="actions"><button class="btn primary" id="errRetry" type="button">Try again</button><button class="btn ghost" id="errBack" type="button">Back to library</button></div>`;
+    E.pErr.innerHTML = `<h2>This video cannot be played</h2><p>${ff ? 'Even compatibility mode could not open the file. It may be damaged or use an unusual format.' : 'This device cannot decode this file. Install ffmpeg on the server device running LocalFlix to enable automatic conversion, or convert the file to MP4.'}</p><div class="actions"><button class="btn primary" id="errRetry" type="button">Try again</button><button class="btn ghost" id="errBack" type="button">Back to library</button></div>`;
     E.pErr.hidden = false;
     $('#errRetry').onclick = () => { fellBack = false; hideErr(); loadSource(now()); };
     $('#errBack').onclick = () => P.close();
@@ -439,7 +439,6 @@
     const base = Math.max(18, Math.min(46, root.clientWidth * 0.026));
     box.style.fontSize = (base * s.size / 100) + 'px'; box.style.color = s.color;
     box.style.setProperty('--cue-bottom', s.pos + '%');
-    box.style.bottom = s.pos + '%';
     box.className = 'cues ' + s.bg;
   }
   async function uploadSub(file) {

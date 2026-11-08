@@ -6,8 +6,10 @@ import mimetypes
 import os
 import re
 import socket
+import sqlite3
 import subprocess
 import threading
+import time
 
 from flask import Flask, Response, abort, jsonify, request, send_file, send_from_directory
 
@@ -105,16 +107,15 @@ def create_app():
     app.services = {"lib": lib, "subs": subs, "media": media, "posters": posters}
     cache = {}
 
-    def kick():
-        posters.schedule(lib.scan())
+    def kick(refresh=False):
+        posters.schedule(lib.scan(), refresh=refresh)
 
     def pub(m):
         st, ver = posters.state(m)
         info = posters.info(m["id"])
-        return {"id": m["id"], "name": m["name"], "title": m["title"], "year": m["year"] or _int(info.get("year_online")),
+        return {"id": m["id"], "stable_id": m.get("stable_id", m["id"]), "name": m["name"], "title": m["title"], "year": m["year"],
                 "path": m["path"], "ext": m["ext"], "size": m["size"], "size_str": m["size_str"], "folder": m["folder"],
-                "cat": m["cat"], "category": m["category"], "added": m["added"], "poster": st, "pv": ver, "subs": m.get("subs", 0), "dur": info.get("dur"),
-                "genre": info.get("genre", "")}
+                "cat": m["cat"], "category": m["category"], "added": m["added"], "poster": st, "pv": ver, "subs": m.get("subs", 0), "dur": info.get("dur")}
 
     def _int(v):
         try:
@@ -226,13 +227,67 @@ def create_app():
         return Response(html, mimetype="text/html")
 
     # ------------------------------------------------------------------ api
+    @app.route("/api/ping")
+    def ping():
+        """Cheap liveness check that does NOT scan the library."""
+        return jsonify({"name": "LocalFlix", "version": VERSION})
+
+    def _prog_db():
+        os.makedirs(cfg.data_dir, exist_ok=True)
+        db_path = os.path.join(cfg.data_dir, "progress.db")
+        conn = sqlite3.connect(db_path)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS progress (
+                stable_key TEXT PRIMARY KEY,
+                seconds REAL,
+                duration REAL,
+                watched INTEGER,
+                updated_at INTEGER
+            )
+        """)
+        return conn
+
+    @app.route("/api/progress")
+    def get_progress():
+        try:
+            with _prog_db() as conn:
+                rows = conn.execute("SELECT stable_key, seconds, duration, watched, updated_at FROM progress").fetchall()
+            return jsonify([{"id": r[0], "t": r[1], "d": r[2], "w": bool(r[3]), "ts": r[4]} for r in rows])
+        except Exception:
+            return jsonify([])
+
+    @app.route("/api/progress", methods=["POST"])
+    def set_progress():
+        body = request.get_json(silent=True) or {}
+        key = str(body.get("id", "")).strip()[:64]
+        if not key:
+            abort(400)
+        secs = float(body.get("seconds", 0.0))
+        dur = float(body.get("duration", 0.0))
+        watched = 1 if body.get("watched") else 0
+        ts = int(body.get("updatedAt", time.time() * 1000))
+        try:
+            with _prog_db() as conn:
+                conn.execute("""
+                    INSERT INTO progress (stable_key, seconds, duration, watched, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(stable_key) DO UPDATE SET
+                        seconds=excluded.seconds,
+                        duration=excluded.duration,
+                        watched=excluded.watched,
+                        updated_at=CASE WHEN excluded.updated_at >= progress.updated_at THEN excluded.updated_at ELSE progress.updated_at END
+                """, (key, secs, dur, watched, ts))
+            return jsonify({"ok": True})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
     @app.route("/api/info")
     def info():
         movies = lib.scan()
         return jsonify({"name": "LocalFlix", "version": VERSION, "count": len(movies),
                         "movies_dir": cfg.movies_dir if is_local() else "", "movies_dir_ok": os.path.isdir(cfg.movies_dir),
                         "subtitle_files": len(subs.entries), "ffmpeg": media.available,
-                        "online_lookup": bool(cfg.get("online_lookup")), "admin": is_local() or cfg.allow_remote_admin,
+                        "admin": is_local() or cfg.allow_remote_admin,
                         "poster_pending": posters.pending_count()})
 
     @app.route("/api/movies")
@@ -272,8 +327,15 @@ def create_app():
         r = send_file(p, conditional=True, max_age=86400)
         return r
 
+    _last_rescan = [0.0]
+
     @app.route("/api/rescan", methods=["POST"])
     def rescan():
+        now = time.time()
+        # Rate-limit to at most once every 10 seconds to avoid library-walk storms
+        if now - _last_rescan[0] < 10.0:
+            return jsonify({"count": len(lib._movies), "throttled": True})
+        _last_rescan[0] = now
         lib.scan(force=True)
         kick()
         return jsonify({"count": len(lib._movies)})
@@ -298,15 +360,10 @@ def create_app():
                     if v and not os.path.isdir(v):
                         return jsonify({"error": f"That folder does not exist: {v}"}), 400
                     cfg.set(key, v)
-            if "online_lookup" in body:
-                cfg.set("online_lookup", bool(body["online_lookup"]))
-            if "tmdb_key" in body:
-                cfg.set("tmdb_key", str(body["tmdb_key"]).strip())
             lib.scan(force=True)
-            kick()
+            kick(refresh=True)
         return jsonify({"can_edit": can, "movies_dir": cfg.movies_dir if can else "",
-                        "subtitle_dir": cfg.get("subtitle_dir") if can else "",
-                        "online_lookup": bool(cfg.get("online_lookup")), "tmdb_key_set": bool(cfg.get("tmdb_key"))})
+                        "subtitle_dir": cfg.get("subtitle_dir") if can else ""})
 
     # ------------------------------------------------------------------ media
     @app.route("/media/<mid>")
@@ -332,9 +389,10 @@ def create_app():
         try:
             start = max(0.0, float(request.args.get("start", 0)))
             audio = max(0, int(request.args.get("audio", 0)))
+            copy_video = request.args.get("video_copy", "0") in ("1", "true")
         except ValueError:
             abort(400)
-        proc = subprocess.Popen(media.transcode_cmd(m["full"], start, audio), stdout=subprocess.PIPE,
+        proc = subprocess.Popen(media.transcode_cmd(m["full"], start, audio, copy_video=copy_video), stdout=subprocess.PIPE,
                                 stderr=subprocess.DEVNULL, creationflags=NOWIN)
 
         def gen():

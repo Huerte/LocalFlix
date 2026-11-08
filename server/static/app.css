@@ -180,8 +180,10 @@ body:not(.pointer) .card:focus-visible .poster{box-shadow:var(--ring-card)}
   overflow:hidden;background:var(--surface2);box-shadow:0 6px 20px rgba(0,0,0,.5);
   transition:box-shadow .2s;
 }
-.poster img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;opacity:0;transition:opacity .4s}
+.poster img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;opacity:0;transition:opacity .3s ease;image-rendering:auto;z-index:1}
 .poster img.ld{opacity:1}
+.poster img.err{display:none}
+.ph-t{font-size:.78rem;font-weight:600;color:rgba(255,255,255,.65);line-height:1.3;padding:12px 10px;word-break:break-word;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;pointer-events:none}
 .card-overlay{
   position:absolute;inset:0;
   background:linear-gradient(transparent 55%,rgba(0,0,0,.88) 100%);
@@ -212,10 +214,14 @@ body:not(.pointer) .card:focus-visible .poster{box-shadow:var(--ring-card)}
 .badges{position:absolute;left:8px;top:8px;display:flex;flex-direction:column;gap:4px;pointer-events:none;z-index:2}
 .badge{font-size:.62rem;font-weight:700;letter-spacing:.06em;padding:2px 6px;border-radius:4px;background:rgba(0,0,0,.75);color:#fff;backdrop-filter:blur(4px);align-self:flex-start}
 .badge.cc{background:rgba(255,255,255,.15);color:#dde2ee;border:1px solid rgba(255,255,255,.2)}
-.prog{position:absolute;left:0;right:0;bottom:0;height:3px;background:rgba(0,0,0,.5);z-index:2}
-.prog i{display:block;height:100%;background:var(--accent);border-radius:0 0 2px 2px}
-.c-t{margin-top:8px;font-weight:600;font-size:.88rem;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.c-m{font-size:.78rem;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.prog{position:absolute;left:0;right:0;bottom:0;height:4px;background:rgba(0,0,0,.6);z-index:2}
+.prog i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),#ff4757);border-radius:0 2px 2px 0}
+.c-info{padding:8px 4px 4px;display:flex;flex-direction:column;gap:4px}
+.c-t{font-weight:600;font-size:.9rem;line-height:1.28;letter-spacing:-.01em;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;color:var(--text);transition:color .15s}
+.c-m{display:flex;align-items:center;gap:6px;font-size:.78rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.c-yr{font-variant-numeric:tabular-nums;font-weight:500}
+.c-gn{max-width:90px;overflow:hidden;text-overflow:ellipsis}
+.c-ext{padding:1px 5px;background:var(--surface3);border-radius:4px;font-size:.68rem;font-weight:700;letter-spacing:.04em;color:rgba(255,255,255,.75);border:1px solid var(--line2)}
 
 /* ---- skeleton ---- */
 .skel{aspect-ratio:2/3;border-radius:var(--r-card);background:var(--surface2);position:relative;overflow:hidden}
@@ -329,8 +335,8 @@ body:not(.pointer) .card:focus-visible .poster{box-shadow:var(--ring-card)}
   backdrop-filter:blur(0px);
 }
 .player.hide-ui .p-top,.player.hide-ui .p-bottom,.player.hide-ui .p-shade{opacity:0;pointer-events:none}
-.player.hide-ui .cues{bottom:8%}
-.player:not(.hide-ui) .cues{bottom:calc(8% + 96px)}
+.player.hide-ui .cues{bottom:var(--cue-bottom,8%)}
+.player:not(.hide-ui) .cues{bottom:calc(var(--cue-bottom,8%) + 96px)}
 .p-row{display:flex;align-items:center;gap:1px;margin-top:6px;padding:4px 0}
 .grow{flex:1}
 .pbtn{
@@ -570,7 +576,7 @@ html.lftv{
   --safe-x:6vw;                     /* TVs crop/overscan the edges: keep everything inside 6% / 5% */
   --safe-y:5vh;
   --pad:6vw;
-  --ring-card:0 0 0 3px var(--accent);  /* no big blurred glow: slow to paint and it was clipped by the rows */
+  --ring-card:0 0 0 3px var(--accent), 0 8px 24px rgba(229,9,20,.35);
   scroll-behavior:auto;             /* scrolling is animated by app.js, never by the browser */
 }
 html.lftv body{min-height:0}
@@ -590,10 +596,12 @@ html.lftv .row .card{scroll-snap-align:none}
 html.lftv .grid{gap:30px 20px;padding:14px 0;margin-top:16px}
 
 /* focus effect: ONE rule, transform only (GPU), short */
-html.lftv .card{transition:transform .12s ease-out}
+html.lftv .card{transition:transform .16s cubic-bezier(.16, 1, .3, 1)}
 html.lftv .card:hover{transform:none}
 html.lftv .card:focus,html.lftv .card:focus-visible{transform:scale(1.08);z-index:10;box-shadow:none;will-change:transform}
-html.lftv .card:focus .poster,html.lftv .card:focus-visible .poster{box-shadow:var(--ring-card)}
+html.lftv .card:focus .poster,html.lftv .card:focus-visible .poster{box-shadow:var(--ring-card);outline:none}
+html.lftv .card:focus .c-t,html.lftv .card:focus-visible .c-t{color:#fff;font-weight:700}
+html.lftv .card:focus .c-ext,html.lftv .card:focus-visible .c-ext{border-color:var(--accent);color:#fff}
 
 /* remove everything that is expensive on a TV GPU/CPU */
 html.lftv .poster{box-shadow:none;transition:none}

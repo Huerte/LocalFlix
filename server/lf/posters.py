@@ -1,4 +1,4 @@
-"""Poster pipeline: local image -> embedded art -> video frame grab."""
+"""Poster pipeline: local image -> embedded cover -> video frame grab."""
 from __future__ import annotations
 
 import json
@@ -46,14 +46,14 @@ class Posters:
         src = self.path(mid)
         if not src or not self.media.available:
             return src
-        width = max(120, min(int(width), 800))
+        width = max(120, min(int(width), 1080))
         out = os.path.join(self.dir, f"{mid}.t{width}.jpg")
         try:
             if os.path.isfile(out) and os.path.getmtime(out) >= os.path.getmtime(src):
                 return out
             tmp = out + ".tmp.jpg"
             r = self.media.run([self.media.ffmpeg, "-y", "-v", "error", "-i", src, "-vf", f"scale={width}:-2",
-                                "-frames:v", "1", "-q:v", "5", tmp], 30)
+                                "-frames:v", "1", "-q:v", "2", tmp], 30)
             if r.returncode == 0 and os.path.isfile(tmp) and os.path.getsize(tmp) > 300:
                 os.replace(tmp, out)
                 return out
@@ -65,8 +65,11 @@ class Posters:
         i = self.meta.get(m["id"])
         if not i:
             return "pending", 0
-        if i.get("kind"):
+        if i.get("kind") and self.path(m["id"]):
             return "ready", i.get("ver", 0)
+        with self._cv:
+            if m["id"] in self._queued:
+                return "pending", 0
         return "none", 0
 
     def pending_count(self):
@@ -77,7 +80,8 @@ class Posters:
         with self._cv:
             for m in movies:
                 i = self.meta.get(m["id"])
-                if refresh or not i:
+                missing_file = not self.path(m["id"])
+                if refresh or not i or not i.get("kind") or missing_file:
                     if m["id"] not in self._queued:
                         self._queued.add(m["id"])
                         self._queue.append(m)
@@ -187,7 +191,7 @@ class Posters:
                 except OSError:
                     pass
 
-        # Step 3: grab a representative frame directly from the video
+        # Step 3: grab a representative static video frame directly from the video
         if not kind and self.media.available:
             out = os.path.join(self.dir, f"{mid}.frame.jpg")
             if self.media.grab_frame(m["full"], dur, out):
